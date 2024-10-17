@@ -1,0 +1,2475 @@
+##template properties
+name =Easy_Fabric_IOS_XE;
+description = Fabric for a VXLAN EVPN Campus deployment with Catalyst 9000 switches and Nexus 9000 switches.;
+tags =Campus VXLAN EVPN;
+userDefined = false;
+supportedPlatforms = IOS-XE;
+templateType = FABRIC;
+templateSubType = NA;
+contentType = PYTHON;
+implements = ;
+dependencies = ;
+published = false;
+imports = ;
+##
+##template variables
+
+#    Copyright (c) 2020-2023 by Cisco Systems, Inc.
+#    All rights reserved.
+#General
+@(IsMandatory=true, IsFabricName=true, DisplayName="Fabric Name", Description="Please provide the fabric name to create it (Max Size 64)")
+string FABRIC_NAME{
+  minLength = 1;
+  maxLength = 64;
+};
+
+@(IsMandatory=true, IsAsn=true, Description="1-65535", DisplayName="BGP ASN")
+integer BGP_AS{
+min=1;
+max=65535;
+};
+
+@(IsMandatory=false, IsInternal=true)
+string BGP_AS_PREV;
+
+@(IsMandatory=true, DisplayName="Enable IPv6 Underlay", IsInternal=true)
+boolean UNDERLAY_IS_V6
+{
+defaultValue=false;
+};
+
+@(IsMandatory=true, IsShow="UNDERLAY_IS_V6==true", DisplayName="Enable IPv6 Link-Local Address", IsInternal=true)
+boolean USE_LINK_LOCAL
+{
+defaultValue=true;
+};
+
+@(IsMandatory=true, IsFabricTechnology=true, DisplayName="Fabric Technology", ReadOnly=true, Section="Hidden")
+string FABRIC_TECHNOLOGY
+{
+defaultValue=IOS-XE_VXLANFabric;
+};
+
+@(IsMandatory=true, IsAsnTemplate=true, ReadOnly=true,Section="Hidden")
+string default_asn_template
+{
+defaultValue=bgp_asn;
+};
+
+@(IsMandatory=true, Enum="p2p,unnumbered", IsShow="UNDERLAY_IS_V6!=true", DisplayName="Fabric Interface Numbering", Description="Numbered(Point-to-Point) or Unnumbered", Section="Hidden")
+string FABRIC_INTERFACE_TYPE
+{
+defaultValue=p2p;
+};
+
+@(IsMandatory=true, IsShow="UNDERLAY_IS_V6==false", Enum="30,31", Description="Mask for Underlay Subnet IP Range", DisplayName="Underlay Subnet IP Mask")
+integer SUBNET_TARGET_MASK
+{
+min = 30;
+max = 31;
+defaultValue=30;
+};
+
+@(IsMandatory=true, IsShow="UNDERLAY_IS_V6==true && USE_LINK_LOCAL==false", Enum="126,127", Description="Mask for Underlay Subnet IPv6 Range", DisplayName="Underlay Subnet IPv6 Mask", IsInternal=true)
+integer V6_SUBNET_TARGET_MASK
+{
+min = 126;
+max = 127;
+defaultValue=126;
+};
+
+@(ReadOnly=true, IsMandatory=true, Enum="ospf", DisplayName="Link-State Routing Protocol", Description="Suppported routing protocols (OSPF)")
+string LINK_STATE_ROUTING
+{
+defaultValue=ospf;
+};
+
+@(IsMandatory=true, Enum="2,4", Description="Number of spines acting as Route-Reflectors", DisplayName="Route-Reflectors")
+integer RR_COUNT
+{
+defaultValue=2;
+};
+
+@(IsMandatory=true, IsAnycastGatewayMac=true, Description="Shared MAC address for all leafs (xxxx.xxxx.xxxx)", DisplayName="Anycast Gateway MAC")
+macAddress ANYCAST_GW_MAC
+{
+defaultValue=2020.0000.00aa;
+};
+
+@(IsMandatory=false, NoConfigChg=true, DisplayName="Enable Performance Monitoring")
+boolean PM_ENABLE
+{
+defaultValue=false;
+};
+
+@(IsMandatory=false, IsInternal=true)
+boolean PM_ENABLE_PREV
+{
+defaultValue=false;
+};
+
+@(IsMandatory=false, DisplayName="Internal Anycast Gateway MAC", IsInternal=true)
+macAddress ANYCAST_GW_MAC_PREV;
+
+#Multicast Replication
+@(ReadOnly=true, IsMandatory=true, Enum="Multicast", IsReplicationMode=true, IsShow="UNDERLAY_IS_V6!=true", Description="Replication Mode for BUM Traffic", DisplayName="Replication Mode", Section="Replication")
+string REPLICATION_MODE
+{
+defaultValue=Multicast;
+};
+
+@(IsMandatory=true, IsMulticastGroupSubnet=true,
+IsShow="REPLICATION_MODE==Multicast && UNDERLAY_IS_V6!=true", Description="Multicast address with prefix 16 to 30", DisplayName="Multicast Group Subnet", Section="Replication")
+ipV4AddressWithSubnet MULTICAST_GROUP_SUBNET
+{
+defaultValue=239.1.1.0/25;
+};
+
+@(IsMandatory=false, Description="For Overlay Multicast Support In VXLAN Fabrics", DisplayName="Enable Tenant Routed Multicast (TRM)", Section="Replication")
+boolean ENABLE_TRM
+{
+defaultValue=false;
+};
+
+@(IsMandatory=true, IsShow="REPLICATION_MODE==Multicast && UNDERLAY_IS_V6!=true", Enum="2,4", Description="Number of spines acting as Rendezvous-Point (RP)", DisplayName="Rendezvous-Points", Section="Replication")
+integer RP_COUNT
+{
+defaultValue=2;
+};
+
+@(IsMandatory=true, IsShow="REPLICATION_MODE==Multicast && UNDERLAY_IS_V6!=true", Enum="asm,bidir", Description="Multicast RP Mode", DisplayName="RP Mode", Section="Replication", IsInternal=true)
+string RP_MODE
+{
+defaultValue=asm;
+};
+
+@(IsMandatory=true, IsShow="REPLICATION_MODE==Multicast && UNDERLAY_IS_V6!=true", Description="(Min:0, Max:1023)", DisplayName="Underlay RP Loopback Id", Section="Replication")
+integer RP_LB_ID{
+min=0;
+max=1023;
+defaultValue=254;
+};
+
+#Protocols
+
+@(IsMandatory=true, Description="(Min:0, Max:1023)", DisplayName="Underlay Routing Loopback Id", Section="Protocols")
+integer BGP_LB_ID{
+min=0;
+max=1023;
+defaultValue=0;
+};
+
+@(IsMandatory=true, Description="(Min:0, Max:1023)", DisplayName="Underlay VTEP Loopback Id", Section="Protocols")
+integer NVE_LB_ID{
+min=0;
+max=1023;
+defaultValue=1;
+};
+
+@(IsMandatory=true, IsShow="LINK_STATE_ROUTING==ospf", DisplayName="OSPF Process Id", Description="(Min:1, Max:65535). For Nexus switches, this is the OSPF Process Tag", Section="Protocols")
+integer OSPF_PROCESS_ID
+{
+min = 1;
+max = 65535;
+defaultValue=1;
+};
+
+@(IsMandatory=false, IsInternal=true)
+string LINK_STATE_ROUTING_TAG;   # serve as OSPF_PROCESS_ID_PREV;
+
+@(IsMandatory=true, IsShow="LINK_STATE_ROUTING==ospf", DisplayName="OSPF Area Id", Description="OSPF Area Id in IP address format", Section="Protocols")
+string OSPF_AREA_ID
+{
+minLength = 1;
+maxLength = 15;
+defaultValue=0.0.0.0;
+};
+
+@(IsMandatory=true, IsShow="LINK_STATE_ROUTING==ospf && UNDERLAY_IS_V6==false", DisplayName="Enable OSPF Authentication", Section="Protocols", IsInternal=true)
+boolean OSPF_AUTH_ENABLE{
+defaultValue=false;
+};
+
+@(IsMandatory=true, IsShow="LINK_STATE_ROUTING==ospf && OSPF_AUTH_ENABLE==true", DisplayName="OSPF Authentication Key ID", Description="(Min:0, Max:255)", Section="Protocols", IsInternal=true)
+integer OSPF_AUTH_KEY_ID
+{
+min = 0;
+max = 255;
+defaultValue = 127;
+};
+
+@(IsMandatory=true, IsShow="LINK_STATE_ROUTING==ospf && OSPF_AUTH_ENABLE==true", DisplayName="OSPF Authentication Key", Description="3DES Encrypted", Section="Protocols", IsInternal=true)
+string OSPF_AUTH_KEY
+{
+minLength = 1;
+maxLength = 256;
+};
+
+@(IsMandatory=false, IsShow="LINK_STATE_ROUTING==is-is", Enum="level-1,level-2", DisplayName="IS-IS Level", Description="Supported IS types: level-1, level-2", Section="Protocols", IsInternal=true)
+string ISIS_LEVEL
+{
+defaultValue=level-2;
+};
+
+@(IsMandatory=true, IsShow="LINK_STATE_ROUTING==is-is && UNDERLAY_IS_V6==false", DisplayName="Enable IS-IS Authentication", Section="Protocols", IsInternal=true)
+boolean ISIS_AUTH_ENABLE{
+defaultValue=false;
+};
+
+@(IsMandatory=true, IsShow="LINK_STATE_ROUTING==is-is && ISIS_AUTH_ENABLE==true", DisplayName="IS-IS Authentication Keychain Name", Section="Protocols", IsInternal=true)
+string ISIS_AUTH_KEYCHAIN_NAME
+{
+minLength = 1;
+maxLength = 63;
+};
+
+@(IsMandatory=true, IsShow="LINK_STATE_ROUTING==is-is && ISIS_AUTH_ENABLE==true", DisplayName="IS-IS Authentication Key ID", Description="(Min:0, Max:65535)", Section="Protocols", IsInternal=true)
+integer ISIS_AUTH_KEYCHAIN_KEY_ID
+{
+min = 0;
+max = 65535;
+defaultValue = 127;
+};
+
+@(IsMandatory=true, IsShow="LINK_STATE_ROUTING==is-is && ISIS_AUTH_ENABLE==true", DisplayName="IS-IS Authentication Key", Description="Cisco Type 7 Encrypted", Section="Protocols", IsInternal=true)
+string ISIS_AUTH_KEY
+{
+minLength = 1;
+maxLength = 255;
+};
+
+@(IsMandatory=true, IsShow="UNDERLAY_IS_V6==false", DisplayName="Enable BGP Authentication", Section="Protocols", IsInternal=true)
+boolean BGP_AUTH_ENABLE{
+defaultValue=false;
+};
+
+@(IsMandatory=true, Enum="3,7", IsShow="BGP_AUTH_ENABLE==true", DisplayName="BGP Authentication Key <br/>Encryption Type", Description="BGP Key Encryption Type: 3 - 3DES, 7 - Cisco", Section="Protocols", IsInternal=true)
+string BGP_AUTH_KEY_TYPE {
+defaultValue=3;
+};
+
+@(IsMandatory=true, IsShow="BGP_AUTH_ENABLE==true", DisplayName="BGP Authentication Key", Description="Encrypted BGP Authentication Key based on type", Section="Protocols", IsInternal=true)
+string BGP_AUTH_KEY
+{
+minLength = 1;
+maxLength = 256;
+};
+
+@(IsMandatory=false, IsShow="UNDERLAY_IS_V6==false", DisplayName="Enable BFD", Description="Valid for IPv4 Underlay only", Section="Protocols", IsInternal=true)
+boolean BFD_ENABLE{
+defaultValue=false;
+};
+
+@(IsMandatory=false, IsShow="UNDERLAY_IS_V6==false && BFD_ENABLE==true", DisplayName="Enable BFD For iBGP", Section="Protocols", IsInternal=true)
+boolean BFD_IBGP_ENABLE{
+defaultValue=false;
+};
+
+@(IsMandatory=false, IsShow="UNDERLAY_IS_V6==false && BFD_ENABLE==true && LINK_STATE_ROUTING==ospf", DisplayName="Enable BFD For OSPF", Section="Protocols", IsInternal=true)
+boolean BFD_OSPF_ENABLE{
+defaultValue=false;
+};
+
+@(IsMandatory=false, IsShow="UNDERLAY_IS_V6==false && BFD_ENABLE==true && LINK_STATE_ROUTING==is-is", DisplayName="Enable BFD For ISIS", Section="Protocols", IsInternal=true)
+boolean BFD_ISIS_ENABLE{
+defaultValue=false;
+};
+
+@(IsMandatory=false, IsShow="UNDERLAY_IS_V6==false && BFD_ENABLE==true && REPLICATION_MODE==Multicast", DisplayName="Enable BFD For PIM", Section="Protocols", IsInternal=true)
+boolean BFD_PIM_ENABLE{
+defaultValue=false;
+};
+
+@(IsMandatory=false, IsShow="UNDERLAY_IS_V6==false && FABRIC_INTERFACE_TYPE==p2p && BFD_ENABLE==true", DisplayName="Enable BFD Authentication", Section="Protocols", IsInternal=true)
+boolean BFD_AUTH_ENABLE{
+defaultValue=false;
+};
+
+@(IsMandatory=false, IsShow="UNDERLAY_IS_V6==false && BFD_ENABLE==true && FABRIC_INTERFACE_TYPE==p2p && BFD_AUTH_ENABLE==true", DisplayName="BFD Authentication Key ID", Section="Protocols", IsInternal=true)
+integer BFD_AUTH_KEY_ID
+{
+min = 1;
+max = 255;
+defaultValue = 100;
+};
+
+@(IsMandatory=false, IsShow="UNDERLAY_IS_V6==false && BFD_ENABLE==true && FABRIC_INTERFACE_TYPE==p2p && BFD_AUTH_ENABLE==true", DisplayName="BFD Authentication Key", Description="Encrypted SHA1 secret value", Section="Protocols", IsInternal=true)
+string BFD_AUTH_KEY
+{
+minLength = 1;
+maxLength = 40;
+};
+
+#Advanced
+@(IsMandatory=true, IsVrfTemplate=true, Enum="%TEMPLATES.vrf,%TEMPLATES.xeVrf", Description="Default Overlay VRF Template For Leafs", DisplayName="VRF Template", AlwaysSetDefault=true, Section="Advanced")
+string default_vrf
+{
+defaultValue=Default_VRF_Universal;
+};
+
+@(IsMandatory=true, IsNetworkTemplate=true, Enum="%TEMPLATES.network,%TEMPLATES.xeNetwork", Description="Default Overlay Network Template For Leafs", DisplayName="Network Template", AlwaysSetDefault=true, Section="Advanced")
+string default_network
+{
+defaultValue=Default_Network_Universal;
+};
+
+@(IsMandatory=true, IsVrfExtensionTemplate=true, Enum="%TEMPLATES.vrfExtension,%TEMPLATES.xeVrf", Description="Default Overlay VRF Template For Borders", DisplayName="VRF Extension Template", AlwaysSetDefault=true, Section="Advanced")
+string vrf_extension_template
+{
+defaultValue=Default_VRF_Extension_Universal;
+};
+
+@(IsMandatory=true, IsNetworkExtensionTemplate=true, Enum="%TEMPLATES.networkExtension,%TEMPLATES.xeNetwork", Description="Default Overlay Network Template For Borders", DisplayName="Network Extension Template", AlwaysSetDefault=true, Section="Advanced")
+string network_extension_template
+{
+defaultValue=Default_Network_Extension_Universal;
+};
+
+@(IsMandatory=true, IsMTU=true, Description="(Min:576, Max:9216).", DisplayName="Intra Fabric Interface MTU", Section="Advanced")
+integer FABRIC_MTU
+{
+min = 1500;
+max = 9216;
+defaultValue=9198;
+};
+
+@(IsMandatory=false, IsInternal=true)
+integer FABRIC_MTU_PREV
+{
+min = 1500;
+max = 9216;
+defaultValue=9198;
+};
+
+@(IsMandatory=true, IsMTU=true, Description="(Min:1500, Max:9216).", DisplayName="Layer 2 Host Interface MTU", Section="Advanced")
+integer L2_HOST_INTF_MTU
+{
+min = 1500;
+max = 9216;
+defaultValue=9198;
+};
+
+@(IsMandatory=false, IsInternal=true)
+integer L2_HOST_INTF_MTU_PREV
+{
+min = 1500;
+max = 9216;
+defaultValue=9198;
+};
+
+@(IsMandatory=false, Description="(Min:1500, Max:9198).", DisplayName="IOS XE System MTU", Section="Advanced")
+integer SYSTEM_MTU
+{
+min = 1500;
+max = 9198;
+defaultValue=1500;
+};
+
+@(IsMandatory=true, Enum="ps-redundant,combined,insrc-redundant", Description="Default Power Supply Mode For The Fabric", DisplayName="Power Supply Mode", Section="Advanced", IsInternal=true)
+string POWER_REDUNDANCY_MODE
+{
+defaultValue=ps-redundant;
+};
+
+@(IsMandatory=true, Enum="dense,lenient,moderate,strict,manual", Description="Fabric Wide CoPP Policy. Customized CoPP policy should be <br/> provided when 'manual' is selected", DisplayName="CoPP Profile", Section="Hidden")
+string COPP_POLICY
+{
+defaultValue=strict;
+};
+
+@(IsMandatory=false, Description="NVE Source Inteface HoldDown Time (Min:1, Max:1500) in seconds", DisplayName="VTEP HoldDown Time", Section="Hidden")
+integer HD_TIME{
+min = 1;
+max = 1500;
+defaultValue=180;
+};
+
+@(IsMandatory=false, DisplayName="Brownfield Overlay Network Name <br/>Format", Description="Generated network name should be < 64 characters", Section="Hidden")
+string BROWNFIELD_NETWORK_NAME_FORMAT
+{
+minLength = 1;
+maxLength = 80;
+defaultValue=Auto_Net_VNI$$VNI$$_VLAN$$VLAN_ID$$;
+};
+
+@(IsMandatory=false, IsShow="UNDERLAY_IS_V6==false", DisplayName="Enable VXLAN OAM", Section="Hidden")
+boolean ENABLE_NGOAM
+{
+defaultValue=true;
+};
+
+@(IsMandatory=false, DisplayName="Enable Tenant DHCP", Section="Advanced")
+boolean ENABLE_TENANT_DHCP
+{
+defaultValue=true;
+};
+
+@(IsMandatory=false, DisplayName="VTP Mode", Enum="off,transparent", Section="Advanced")
+string VTP_MODE
+{
+defaultValue=off;
+};
+
+@(IsMandatory=true, DisplayName="Enable Strict Config Compliance", Section="Hidden")
+boolean STRICT_CC_MODE{
+defaultValue=false;
+};
+
+@(IsMandatory=false, Description="Enable only, when IP Authorization is enabled in the AAA Server", DisplayName="Enable AAA IP Authorization", Section="Advanced", IsInternal=true)
+boolean AAA_REMOTE_IP_ENABLED
+{
+defaultValue=false;
+};
+
+@(IsMandatory=false, DisplayName="Enable NDFC as Trap Host", Section="Advanced")
+boolean SNMP_SERVER_HOST_TRAP
+{
+defaultValue=true;
+};
+
+@(IsMandatory=false, IsFreezeMode=true, DisplayName="Disable all deployments in this fabric", Section="Hidden")
+boolean DEPLOYMENT_FREEZE
+{
+defaultValue=false;
+};
+
+@(IsMandatory=false, IsShow="UNDERLAY_IS_V6!=true", DisplayName="Enable Precision Time Protocol (PTP)", Section="Hidden")
+boolean FEATURE_PTP {
+defaultValue=false;
+};
+
+@(IsMandatory=true, IsShow="FEATURE_PTP==true", Description="(Min:0, Max:1023)", DisplayName="PTP Source Loopback Id", Section="Hidden")
+integer PTP_LB_ID
+{
+min = 0;
+max = 1023;
+defaultValue=0;
+};
+
+@(IsMandatory=true, IsShow="FEATURE_PTP==true", Description="Multiple Independent PTP Clocking Subdomains <br/>on a Single Network (Min:0, Max:127)", DisplayName="PTP Domain Id", Section="Hidden")
+integer PTP_DOMAIN_ID
+{
+min = 0;
+max = 127;
+defaultValue=0;
+};
+
+@(IsMandatory=true, IsShow="UNDERLAY_IS_V6==false", DisplayName="Enable MPLS Handoff", Section="Hidden")
+boolean MPLS_HANDOFF
+{
+defaultValue=false;
+};
+
+@(IsMandatory=true, IsShow="MPLS_HANDOFF==true && UNDERLAY_IS_V6==false", Description="Used for VXLAN to MPLS SR/LDP Handoff <br/>(Min:0, Max:1023)", DisplayName="Underlay MPLS Loopback Id", Section="Hidden")
+integer MPLS_LB_ID{
+min=0;
+max=1023;
+defaultValue=101;
+};
+
+@(IsMandatory=false, DisplayName="Enable Real Time Interface Statistics Collection", Description="Valid for NX-OS only", Section="Advanced")
+boolean ENABLE_RT_INTF_STATS
+{
+defaultValue=false;
+};
+
+@(IsMandatory="ENABLE_RT_INTF_STATS==true", IsShow="ENABLE_RT_INTF_STATS==true", DisplayName="Interface Statistics Load Interval", Description="Time in seconds<br/>(Min:5, Max:300)", Section="Advanced")
+integer INTF_STAT_LOAD_INTERVAL{
+min=5;
+max=300;
+defaultValue=10;
+};
+
+@(IsMandatory=false, DisplayName="Enable Overlay Template Conversion", Description="Perform one time conversion of existing vrfs/networks from IOS_XE_VRF and IOS_XE_Network templates to Default_VRF_Universal, Default_VRF_Extension_Universal, Default_Network_Universal and Default_Network_Extension_Universal templates", Section="Advanced")
+boolean ENABLE_OVERLAY_CONVERSION
+{
+defaultValue=false;
+};
+
+@(IsMandatory=false, DisplayName="Enable ssh Bulk-mode", Description="Enable optimizations for bulk data transfer. For IOS XE only", Section="Advanced")
+boolean ENABLE_SSH_BULK_MODE
+{
+defaultValue=false;
+};
+
+@(IsMandatory="ENABLE_SSH_BULK_MODE==true", IsShow="ENABLE_SSH_BULK_MODE==true", DisplayName="SSH window-size", Description="For IOS XE only (Min:131072, Max:1073741824)", Section="Advanced")
+integer SSH_WINDOW_SIZE {
+min=131072;
+max=1073741824;
+defaultValue=131072;
+};
+
+@(IsMandatory=false, IsMultiLineString=true, DisplayName="Banner", Description="Message of the Day (motd) banner. Delimiter followed by message ending with delimiter. For all IOS XE and NX-OS switches in the fabric. The delimter can be any single character or '^C'", Section="Advanced")
+string BANNER;
+
+@(IsMandatory=false, IsMultiLineString=true, DisplayName="Leaf Freeform Config", Description="Additional CLIs For All Leafs As Captured From Show Running Configuration", Section="Advanced")
+string EXTRA_CONF_XE_LEAF;
+
+@(IsMandatory=false, IsMultiLineString=true, DisplayName="Spine Freeform Config", Description="Additional CLIs For All Spines As Captured From Show Running Configuration", Section="Advanced")
+string EXTRA_CONF_XE_SPINE;
+
+@(IsMandatory=false, IsMultiLineString=true, DisplayName="Intra-fabric Links Additional Config", Description="Additional CLIs For All Intra-Fabric Links", Section="Advanced")
+string EXTRA_CONF_XE_INTRA_LINKS;
+
+#Resources
+@(IsMandatory=false, Description="Checking this will disable Dynamic Underlay IP Address Allocations", DisplayName="Manual Underlay IP Address <br/>Allocation", Section="Resources", IsInternal=true)
+boolean STATIC_UNDERLAY_IP_ALLOC
+{
+defaultValue=false;
+};
+
+@(IsMandatory=true, IsShow="UNDERLAY_IS_V6==false && STATIC_UNDERLAY_IP_ALLOC==false", Description="Typically Loopback0 IP Address Range", DisplayName="Underlay Routing Loopback IP <br/>Range", Section="Resources")
+ipV4AddressWithSubnet LOOPBACK0_IP_RANGE
+{
+defaultValue=10.2.0.0/22;
+};
+
+@(IsMandatory=true, IsShow="UNDERLAY_IS_V6==false && STATIC_UNDERLAY_IP_ALLOC==false", Description="Typically Loopback1 IP Address Range", DisplayName="Underlay VTEP Loopback IP Range", Section="Resources")
+ipV4AddressWithSubnet LOOPBACK1_IP_RANGE
+{
+defaultValue=10.3.0.0/22;
+};
+
+@(IsMandatory=true, IsShow="($$STATIC_UNDERLAY_IP_ALLOC$$=='false' && $$UNDERLAY_IS_V6$$=='false' && $$REPLICATION_MODE$$=='Multicast') || ($$STATIC_UNDERLAY_IP_ALLOC$$=='true' && $$UNDERLAY_IS_V6$$=='false' && $$REPLICATION_MODE$$=='Multicast' && $$RP_MODE$$=='bidir')", Description="Anycast or Phantom RP IP Address Range", DisplayName="Underlay RP Loopback IP Range", Section="Resources")
+ipV4AddressWithSubnet ANYCAST_RP_IP_RANGE
+{
+defaultValue=10.254.254.0/24;
+};
+
+@(IsMandatory=true, IsShow="UNDERLAY_IS_V6==false && STATIC_UNDERLAY_IP_ALLOC==false", Description="Address range to assign Numbered and Peer Link SVI IPs", DisplayName="Underlay Subnet IP Range", Section="Resources")
+ipV4AddressWithSubnet SUBNET_RANGE
+{
+defaultValue=10.4.0.0/16;
+};
+
+@(IsMandatory=true, IsShow="MPLS_HANDOFF==true && UNDERLAY_IS_V6==false && STATIC_UNDERLAY_IP_ALLOC==false", Description="Used for VXLAN to MPLS SR/LDP Handoff", DisplayName="Underlay MPLS Loopback IP Range", Section="Hidden")
+ipV4AddressWithSubnet MPLS_LOOPBACK_IP_RANGE
+{
+defaultValue=10.101.0.0/25;
+};
+
+@(IsMandatory=true, IsShow="UNDERLAY_IS_V6==true && STATIC_UNDERLAY_IP_ALLOC==false", Description="Typically Loopback0 IPv6 Address Range", DisplayName="Underlay Routing Loopback IPv6 <br/>Range", Section="Hidden")
+ipV6AddressWithSubnet LOOPBACK0_IPV6_RANGE
+{
+defaultValue=fd00::a02:0/119;
+};
+
+@(IsMandatory=true, IsShow="UNDERLAY_IS_V6==true && STATIC_UNDERLAY_IP_ALLOC==false", Description="Typically Loopback1 and Anycast Loopback IPv6 Address Range", DisplayName="Underlay VTEP Loopback IPv6 <br/>Range", Section="Hidden")
+ipV6AddressWithSubnet LOOPBACK1_IPV6_RANGE
+{
+defaultValue=fd00::a03:0/118;
+};
+
+@(IsMandatory=true, IsShow="UNDERLAY_IS_V6==true && STATIC_UNDERLAY_IP_ALLOC==false && USE_LINK_LOCAL==false", Description="IPv6 Address range to assign Numbered and Peer Link SVI IPs", DisplayName="Underlay Subnet IPv6 Range", Section="Hidden")
+ipV6AddressWithSubnet V6_SUBNET_RANGE
+{
+defaultValue=fd00::a04:0/112;
+};
+
+@(IsMandatory=true, IsShow="UNDERLAY_IS_V6==true && STATIC_UNDERLAY_IP_ALLOC==false", DisplayName="BGP Router ID Range for IPv6 Underlay", Section="Hidden")
+ipV4AddressWithSubnet ROUTER_ID_RANGE
+{
+defaultValue=10.2.0.0/23;
+};
+
+@(IsMandatory=true, IsL2VniRange=true, Description="Overlay Network Identifier Range (Min:1, Max:16777214)", DisplayName="Layer 2 VXLAN VNI Range", Section="Resources")
+integerRange L2_SEGMENT_ID_RANGE
+{
+min=1;
+max=16777214;
+defaultValue=30000-49000;
+};
+
+@(IsMandatory=true, IsL3VniRange=true, Description="Overlay VRF Identifier Range (Min:1, Max:16777214)", DisplayName="Layer 3 VXLAN VNI Range", Section="Resources")
+integerRange L3_PARTITION_ID_RANGE
+{
+min=1;
+max=16777214;
+defaultValue=50000-59000;
+};
+
+@(IsMandatory=true, IsNetworkVlanRange=true, Description="Per Switch Overlay Network VLAN Range (Min:2, Max:4094)", DisplayName="Network VLAN Range", Section="Resources")
+integerRange NETWORK_VLAN_RANGE
+{
+min=2;
+max=4094;
+defaultValue=2300-2999;
+};
+
+@(IsMandatory=true, IsVrfVlanRange=true, Description="Per Switch Overlay VRF VLAN Range (Min:2, Max:4094)", DisplayName="VRF VLAN Range", Section="Resources")
+integerRange VRF_VLAN_RANGE
+{
+min=2;
+max=4094;
+defaultValue=2000-2299;
+};
+
+@(IsMandatory=true, IsDot1qIdRange=true, Description="Per Border Dot1q Range For VRF Lite Connectivity (Min:2, Max:4094)", DisplayName="Subinterface Dot1q Range", Section="Resources")
+integerRange SUBINTERFACE_RANGE
+{
+min=2;
+max=4094;
+defaultValue=2-511;
+};
+
+@(IsMandatory=true, Enum="Manual,Back2Back&ToExternal", Description="VRF Lite Inter-Fabric Connection Deployment Options. If 'Back2Back&ToExternal' is selected, VRF Lite IFCs are auto created between border devices of two Easy Fabrics, and between border devices in Easy Fabric and edge routers in External Fabric. The IP address is taken from the 'VRF Lite Subnet IP Range' pool.", DisplayName="VRF Lite Deployment", Section="Resources")
+string VRF_LITE_AUTOCONFIG
+{
+defaultValue=Manual;
+};
+ 
+@(IsMandatory=false, IsShow="VRF_LITE_AUTOCONFIG!=Manual", DisplayName="Auto Deploy for Peer", Description="Whether to auto generate VRF LITE sub-interface and BGP peering configuration on managed neighbor devices. If set, auto created VRF Lite IFC links will have 'Auto Deploy for Peer' enabled.", Section="Resources")
+boolean AUTO_SYMMETRIC_VRF_LITE
+{
+defaultValue=false;
+};
+
+@(IsMandatory=false, IsShow="VRF_LITE_AUTOCONFIG!=Manual", DisplayName="Auto Deploy Default VRF", Description="Whether to auto generate Default VRF interface and BGP peering configuration on VRF LITE IFC auto deployment. If set, auto created VRF Lite IFC links will have 'Auto Deploy Default VRF' enabled.", Section="Resources")
+boolean AUTO_VRFLITE_IFC_DEFAULT_VRF
+{
+defaultValue=false;
+};
+
+@(IsMandatory=false, IsShow="AUTO_VRFLITE_IFC_DEFAULT_VRF==true", DisplayName="Auto Deploy Default VRF for Peer", Description="Whether to auto generate Default VRF interface and BGP peering configuration on managed neighbor devices. If set, auto created VRF Lite IFC links will have 'Auto Deploy Default VRF for Peer' enabled.", Section="Resources")
+boolean AUTO_SYMMETRIC_DEFAULT_VRF
+{
+defaultValue=false;
+};
+
+@(IsMandatory="AUTO_VRFLITE_IFC_DEFAULT_VRF==true", IsShow="AUTO_VRFLITE_IFC_DEFAULT_VRF==true", DisplayName="Redistribute BGP Route-map Name", Description="Route Map used to redistribute BGP routes to IGP in default vrf in auto created VRF Lite IFC links", Section="Resources")
+string DEFAULT_VRF_REDIS_BGP_RMAP
+{
+defaultValue=extcon-rmap-filter;
+};
+
+@(IsMandatory=true, Description="Address range to assign P2P Interfabric Connections", DisplayName="VRF Lite Subnet IP Range", Section="Resources")
+ipV4AddressWithSubnet DCI_SUBNET_RANGE
+{
+defaultValue=10.33.0.0/16;
+};
+
+@(IsMandatory=true,  Description="(Min:8, Max:31)", DisplayName="VRF Lite Subnet Mask", Section="Resources")
+integer DCI_SUBNET_TARGET_MASK
+{
+min = 8;
+max = 31;
+defaultValue=30;
+};
+
+@(IsMandatory=false, DisplayName="Auto Allocation of Unique IP on VRF Extension over VRF Lite IFC", Description="When enabled, IP prefix allocated to the VRF LITE IFC is not reused on VRF extension over VRF LITE IFC. Instead, unique IP Subnet is allocated for each VRF extension over VRF LITE IFC.", Section="Resources")
+boolean AUTO_UNIQUE_VRF_LITE_IP_PREFIX
+{
+defaultValue=false;
+};
+
+@(IsMandatory=false, IsInternal=true, Section="Resources")
+boolean AUTO_UNIQUE_VRF_LITE_IP_PREFIX_PREV
+{
+defaultValue=false;
+};
+
+@(IsMandatory=false, DisplayName="Per VRF Per VTEP Loopback Auto-Provisioning", Description="Auto provision a loopback IPv4 on a VTEP on VRF attachment. <br/> Note: Enabling this option auto-provisions loopback on existing VRF attachments also when Edit, QuickAttach, or Multiattach actions are performed. <br/> Provisioned loopbacks cannot be deleted until VRFs are unattached.", Section="Resources")
+boolean PER_VRF_LOOPBACK_AUTO_PROVISION
+{
+defaultValue=false;
+};
+
+@(IsMandatory=false, IsInternal=true, Section="Resources")
+boolean PER_VRF_LOOPBACK_AUTO_PROVISION_PREV
+{
+defaultValue=false;
+};
+
+@(IsMandatory=true, IsShow="PER_VRF_LOOPBACK_AUTO_PROVISION==true", DisplayName="Per VRF Per VTEP IP Pool for Loopbacks", Description="Prefix pool to assign IP addresses to loopbacks on VTEPs on a per VRF basis", Section="Resources")
+ipV4AddressWithSubnet PER_VRF_LOOPBACK_IP_RANGE
+{
+defaultValue=10.5.0.0/22;
+};
+
+@(IsMandatory=false, DisplayName="Per VRF Per VTEP Loopback IPv6 Auto-Provisioning", Description="Auto provision a loopback IPv6 on a VTEP on VRF attachment", Section="Hidden")
+boolean PER_VRF_LOOPBACK_AUTO_PROVISION_V6
+{
+defaultValue=false;
+};
+
+@(IsMandatory=false, IsInternal=true, Section="Hidden")
+boolean PER_VRF_LOOPBACK_AUTO_PROVISION_V6_PREV
+{
+defaultValue=false;
+};
+
+@(IsMandatory="PER_VRF_LOOPBACK_AUTO_PROVISION_V6==true", IsShow="PER_VRF_LOOPBACK_AUTO_PROVISION_V6==true", DisplayName="Per VRF Per VTEP IPv6 Pool for Loopbacks", Description="Prefix pool to assign IPv6 addresses to loopbacks on VTEPs on a per VRF basis", Section="Hidden")
+ipV6AddressWithSubnet PER_VRF_LOOPBACK_IP_RANGE_V6
+{
+defaultValue=fd00::a05:0/112;
+};
+
+@(IsMandatory=false, NoConfigChg=true, IsDhcpFlag=true, Description="Automatic IP Assignment For POAP", DisplayName="Enable Bootstrap", Section="Bootstrap")
+boolean BOOTSTRAP_ENABLE{
+defaultValue=false;
+};
+
+@(IsMandatory=false, IsInternal=true, Section="Bootstrap")
+boolean BOOTSTRAP_ENABLE_PREV
+{
+defaultValue=false;
+};
+
+@(IsMandatory=false, NoConfigChg=true, IsShow="BOOTSTRAP_ENABLE==true", Description="Automatic IP Assignment For POAP From Local DHCP Server", DisplayName="Enable Local DHCP Server", Section="Bootstrap")
+boolean DHCP_ENABLE{
+defaultValue=false;
+};
+
+@(IsMandatory=false, NoConfigChg=true, Enum="DHCPv4,DHCPv6", IsShow="DHCP_ENABLE==true && BOOTSTRAP_ENABLE==true", DisplayName="DHCP Version", Section="Bootstrap")
+string DHCP_IPV6_ENABLE
+{
+defaultValue=DHCPv4;
+};
+
+@(IsMandatory=true, NoConfigChg=true, IsShow="DHCP_ENABLE==true && BOOTSTRAP_ENABLE==true", Description="Domain name for DHCP server PnP block", DisplayName="Domain name", Section="Bootstrap")
+string DOMAIN_NAME {
+regularExpr=^((?!-)[A-Za-z0-9-]{1,63}(?<!-)\.)+[A-Za-z]{2,6}$;
+};
+
+@(IsMandatory=true, NoConfigChg=true, IsShow="DHCP_ENABLE==true && BOOTSTRAP_ENABLE==true", Description="Start Address For Switch Out-of-Band POAP", DisplayName="DHCP Scope Start Address", Section="Bootstrap")
+ipAddress DHCP_START;
+
+@(IsMandatory=true, NoConfigChg=true, IsShow="DHCP_ENABLE==true && BOOTSTRAP_ENABLE==true", Description="End Address For Switch Out-of-Band POAP", DisplayName="DHCP Scope End Address", Section="Bootstrap")
+ipAddress DHCP_END;
+
+@(IsMandatory=true, NoConfigChg=true, IsShow="DHCP_ENABLE==true && BOOTSTRAP_ENABLE==true", Description="Default Gateway For Management VRF On The Switch", DisplayName="Switch Mgmt Default Gateway", Section="Bootstrap")
+ipAddress MGMT_GW;
+
+@(IsMandatory=true, NoConfigChg=true, IsShow="DHCP_ENABLE==true && BOOTSTRAP_ENABLE==true && DHCP_IPV6_ENABLE==DHCPv4", Description="(Min:8, Max:30)", DisplayName="Switch Mgmt IP Subnet Prefix", Section="Bootstrap")
+integer MGMT_PREFIX
+{
+min = 8;
+max = 30;
+defaultValue=24;
+};
+
+@(IsMandatory=true, NoConfigChg=true, IsShow="DHCP_ENABLE==true && BOOTSTRAP_ENABLE==true && DHCP_IPV6_ENABLE==DHCPv6", Description="(Min:64, Max:126)", DisplayName="Switch Mgmt IPv6 Subnet Prefix", Section="Bootstrap")
+integer MGMT_V6PREFIX
+{
+min = 64;
+max = 126;
+defaultValue=64;
+};
+
+@(IsMandatory=false, IsShow="BOOTSTRAP_ENABLE==true", IsMultiLineString=true, DisplayName="Bootstrap Freeform Config (IOS-XE)", Description="Additional CLIs required during device bootup/login e.g. AAA/Radius", Section="Bootstrap")
+string BOOTSTRAP_CONF;
+
+@(IsMandatory=false, IsShow="BOOTSTRAP_ENABLE==true", IsMultiLineString=true, DisplayName="Bootstrap Freeform Config (NXOS)", Description="Additional CLIs required during device bootup/login e.g. AAA/Radius", Section="Bootstrap")
+string BOOTSTRAP_CONF_NX_BGW;
+
+
+@(IsMandatory=false, NoConfigChg=true, IsShow="DHCP_ENABLE==true && BOOTSTRAP_ENABLE==true", IsMultiLineString=true, DisplayName="DHCPv4 Multi Subnet Scope",  Description="lines with # prefix are ignored here", Warning="Enter One Subnet Scope per line. <br/> Start_IP, End_IP, Gateway, Prefix <br/> e.g. <br>10.6.0.2, 10.6.0.9, 10.6.0.1, 24 <br>10.7.0.2, 10.7.0.9, 10.7.0.1, 24", Section="Bootstrap")
+string BOOTSTRAP_MULTISUBNET
+{
+defaultValue=#Scope_Start_IP, Scope_End_IP, Scope_Default_Gateway, Scope_Subnet_Prefix;
+};
+
+#Configuration Backup settings
+@(IsMandatory=false, NoConfigChg=true, Description="Backup hourly only if there is any config deployment since last backup", DisplayName="Hourly Fabric Backup", Section="Configuration Backup")
+boolean enableRealTimeBackup;
+@(IsMandatory=false, NoConfigChg=true, Description="Backup at the specified time only if there is any config deployment since last backup", DisplayName="Scheduled Fabric Backup", Section="Configuration Backup")
+boolean enableScheduledBackup;
+@(IsMandatory=true, NoConfigChg=true, IsShow="enableScheduledBackup==true",Description="Time (UTC) in 24hr format. (00:00 to 23:59)", DisplayName="Scheduled Time", Section="Configuration Backup")
+string scheduledTime
+{
+    regularExpr=^([01]\d|2[0-3]):([0-5]\d)$;
+
+};
+
+#Hidden
+@(IsMandatory=true, IsFabricType=true, DisplayName="Fabric Type", ReadOnly=true, Section="Hidden")
+string FABRIC_TYPE
+{
+defaultValue=Switch_Fabric;
+};
+
+@(IsMandatory=false, Section="Hidden")
+string EXT_FABRIC_TYPE;
+
+@(IsMandatory=false, Description="Enable Agnet (developmet purpose only)", DisplayName="Enable Agent", Section="Hidden")
+boolean ENABLE_AGENT
+{
+defaultValue=false;
+};
+
+@(IsMandatory=false, Description="Interface to connect to Agent", DisplayName="Agent Interface", Enum="eth0,eth1", Section="Hidden")
+string AGENT_INTF
+{
+defaultValue=eth0;
+};
+
+@(IsMandatory=true,Enum="Enable,Disable", Description="Allow First Super Spine Add or Last Super Spine Delete From Topology", DisplayName="Super Spine Force Add Del", Section="Hidden")
+string SSPINE_ADD_DEL_DEBUG_FLAG
+{
+defaultValue=Disable;
+};
+
+@(IsMandatory=false, Enum="Enable,Disable", Description="Dont' use until you are aware about it", DisplayName="!!! Only for brf debugging purpose !!!", Section="Hidden")
+string BRFIELD_DEBUG_FLAG
+{
+defaultValue=Disable;
+};
+
+@(IsMandatory=true, DisplayName="Active Migration", Section="Hidden")
+boolean ACTIVE_MIGRATION
+{
+defaultValue=false;
+};
+
+@(IsMandatory=true, DisplayName="Template Family", Section="Hidden")
+string FF
+{
+defaultValue=Easy_Fabric_IOS_XE;
+};
+
+@(IsMandatory=false, NoConfigChg=true, IsInternal=true, Section="Bootstrap")
+ipV4Address DHCP_START_INTERNAL;
+
+@(IsMandatory=false, NoConfigChg=true, IsInternal=true, Section="Bootstrap")
+ipV4Address DHCP_END_INTERNAL;
+
+@(IsMandatory=false, NoConfigChg=true, IsInternal=true, Section="Bootstrap")
+ipV4Address MGMT_GW_INTERNAL;
+
+@(IsMandatory=false, NoConfigChg=true, IsInternal=true, Section="Bootstrap")
+integer MGMT_PREFIX_INTERNAL;
+
+@(IsMandatory=false, NoConfigChg=true, IsInternal=true, Section="Bootstrap")
+string BOOTSTRAP_MULTISUBNET_INTERNAL;
+
+@(IsMandatory=false, NoConfigChg=true, IsInternal=true, Section="Bootstrap")
+integer MGMT_V6PREFIX_INTERNAL;
+
+@(IsMandatory=false, NoConfigChg=true, IsInternal=true, Section="Bootstrap")
+string DHCP_IPV6_ENABLE_INTERNAL;
+
+@(IsMandatory=false, NoConfigChg=true, IsInternal=true, Section="Bootstrap")
+ipV4Address DOMAIN_NAME_INTERNAL;
+
+@(IsMandatory=true, IsInternal=true)
+boolean ENABLE_EVPN
+{
+defaultValue=true;
+};
+
+@(IsMandatory=true, IsInternal=true)
+boolean FEATURE_PTP_INTERNAL
+{
+defaultValue=false;
+};
+
+@(IsMandatory=false, IsInternal=true)
+integer SSPINE_COUNT
+{
+defaultValue=0;
+};
+
+@(IsMandatory=false, IsInternal=true)
+integer SPINE_COUNT
+{
+defaultValue=0;
+};
+
+#All policy templates starts from here.
+@(IsMandatory=true, Enum="base_feature_leaf_upg", Description="Feature Configuration for Leaf", DisplayName="base_feature_leaf", Section="Policy Templates", IsInternal=true)
+string abstract_feature_leaf {
+defaultValue=base_feature_leaf_upg;
+};
+
+@(IsMandatory=true, Enum="base_feature_spine_upg", Description="Feature Configuration for Spine", DisplayName="base_feature_spine", Section="Policy Templates", IsInternal=true)
+string abstract_feature_spine {
+defaultValue=base_feature_spine_upg;
+};
+
+@(IsMandatory=true, Enum="base_dhcp", Description="DHCP Configuration", DisplayName="base_dhcp", Section="Policy Templates", IsInternal=true)
+string abstract_dhcp
+{
+defaultValue=base_dhcp;
+};
+
+@(IsMandatory=true, Enum="base_multicast_11_1", Description="Multicast Configuration", DisplayName="base_multicast", Section="Policy Templates", IsInternal=true)
+string abstract_multicast
+{
+defaultValue=base_multicast_11_1;
+};
+
+@(IsMandatory=true, Enum="anycast_rp", Description="Anycast RP Configuration", DisplayName="anycast_rp", Section="Policy Templates", IsInternal=true)
+string abstract_anycast_rp
+{
+defaultValue=anycast_rp;
+};
+
+@(IsMandatory=true, Enum="ios_xe_int_underlay_loopback", Description="Primary Loopback Interface Configuration", DisplayName="loopback_interface", Section="Policy Templates", IsInternal=true)
+string abstract_loopback_interface
+{
+defaultValue=ios_xe_int_underlay_loopback;
+};
+
+@(IsMandatory=true, Enum="base_isis_level2", Description="ISIS Network Configuration", DisplayName="base_isis_level2", Section="Policy Templates", IsInternal=true)
+string abstract_isis
+{
+defaultValue=base_isis_level2;
+};
+
+@(IsMandatory=true, Enum="base_ospf", Description="OSPF Network Configuration", DisplayName="base_ospf", Section="Policy Templates", IsInternal=true)
+string abstract_ospf
+{
+defaultValue=ios_xe_router_ospf;
+};
+
+@(IsMandatory=true, Enum="isis_interface", Description="ISIS Interface Configuration", DisplayName="isis_interface", Section="Policy Templates", IsInternal=true)
+string abstract_isis_interface
+{
+defaultValue=isis_interface;
+};
+
+@(IsMandatory=true, Enum="ospf_interface", Description="OSPF Interface Configuration", DisplayName="ospf_interface_11_1", Section="Policy Templates", IsInternal=true)
+string abstract_ospf_interface
+{
+defaultValue=ospf_interface_11_1;
+};
+
+@(IsMandatory=true, Enum="pim_interface", Description="PIM Interface Configuration", DisplayName="pim_interface", Section="Policy Templates", IsInternal=true)
+string abstract_pim_interface
+{
+defaultValue=pim_interface;
+};
+
+@(IsMandatory=true, Enum="route_map", Description="Route-Map Configuration", DisplayName="abstract_route_map", Section="Policy Templates", IsInternal=true)
+string abstract_route_map
+{
+defaultValue=route_map;
+};
+
+@(IsMandatory=true, Enum="base_bgp", Description="BGP Configuration", DisplayName="base_bgp", Section="Policy Templates", IsInternal=true)
+string abstract_bgp
+{
+defaultValue=base_bgp;
+};
+
+@(IsMandatory=true, Enum="evpn_bgp_rr", Description="BGP RR Configuration", DisplayName="evpn_bgp_rr", Section="Policy Templates", IsInternal=true)
+string abstract_bgp_rr
+{
+defaultValue=evpn_bgp_rr;
+};
+
+@(IsMandatory=true, Enum= "evpn_bgp_rr_neighbor", Description="BGP Neighbor Configuration", DisplayName="evpn_bgp_rr_neighbor", Section="Policy Templates", IsInternal=true)
+string abstract_bgp_neighbor
+{
+defaultValue=evpn_bgp_rr_neighbor;
+};
+
+@(IsMandatory=true, Enum= "extra_config_leaf", Description="Add Extra Configuration for Leaf", DisplayName="extra_config_leaf", Section="Policy Templates", IsInternal=true)
+string abstract_extra_config_leaf
+{
+defaultValue=extra_config_leaf;
+};
+
+@(IsMandatory=true, Enum= "extra_config_bootstrap", Description="Add Extra Configuration for Bootstrap", DisplayName="extra_config_bootstrap", Section="Policy Templates", IsInternal=true)
+string abstract_extra_config_bootstrap
+{
+defaultValue=extra_config_bootstrap_11_1;
+};
+
+@(IsMandatory=true, Enum= "extra_config_spine", Description="Add Extra Configuration for Spine", DisplayName="extra_config_spine", Section="Policy Templates", IsInternal=true)
+string abstract_extra_config_spine
+{
+defaultValue=extra_config_spine;
+};
+
+@(IsMandatory=true, Enum="int_routed_host", Description="Routed Host Port Configuration", DisplayName="routed_host", Section="Policy Templates", IsInternal=true)
+string abstract_routed_host
+{
+defaultValue=ios_xe_int_routed_host;
+};
+
+@(IsMandatory=true, Enum="int_trunked_host", Description="trunk Host Port Configuration", DisplayName="trunk_host", Section="Policy Templates", IsInternal=true)
+string abstract_trunk_host
+{
+defaultValue=ios_xe_int_trunk_host;
+};
+
+@(IsMandatory=false, DisplayName="Port Channel Interface Default Policy", IsInternal=true)
+string CAT9K_INTERFACE_PORT_CHANNEL_DEFAULT_POLICY
+{
+defaultValue=ios_xe_int_port_channel_trunk_host;
+};
+
+@(IsMandatory=false, DisplayName="Port Channel Interface Default Policy", IsInternal=true)
+string N9K_INTERFACE_PORT_CHANNEL_DEFAULT_POLICY
+{
+defaultValue=int_port_channel_trunk_host;
+};
+
+@(IsMandatory=false, DisplayName="Loopback Interface Default Policy", IsInternal=true)
+string CAT9K_INTERFACE_LOOPBACK_DEFAULT_POLICY
+{
+defaultValue=ios_xe_int_loopback;
+};
+
+@(IsMandatory=false, DisplayName="Loopback Interface Default Policy", IsInternal=true)
+string N9K_INTERFACE_LOOPBACK_DEFAULT_POLICY
+{
+defaultValue=int_loopback;
+};
+
+
+
+
+@(IsMandatory=false, IsSiteId=true,AutoPopulate="BGP_AS", Description="For EVPN Multi-Site Support (Min:1, Max: 281474976710655). <br/>Defaults to Fabric ASN", DisplayName="Site Id", Section="Border Gateway")
+string SITE_ID
+{
+minLength=1;
+maxLength=15;
+regularExpr=^(((\+)?[1-9]{1}[0-9]{0,13}|(\+)?[1]{1}[0-9]{1,14}|(\+)?[2]{1}([0-7]{1}[0-9]{13}|[8]{1}([0-0]{1}[0-9]{12}|[1]{1}([0-3]{1}[0-9]{11}|[4]{1}([0-6]{1}[0-9]{10}|[7]{1}([0-3]{1}[0-9]{9}|[4]{1}([0-8]{1}[0-9]{8}|[9]{1}([0-6]{1}[0-9]{7}|[7]{1}([0-5]{1}[0-9]{6}|[6]{1}([0-6]{1}[0-9]{5}|[7]{1}([0-0]{1}[0-9]{4}|[1]{1}([0]{0}[0-9]{3}|[0]{1}([0-5]{1}[0-9]{2}|[6]{1}([0-4]{1}[0-9]{1}|[5]{1}[0-5]{1}))))))))))))))|([1-5]\d{4}|[1-9]\d{0,3}|6[0-4]\d{3}|65[0-4]\d{2}|655[0-2]\d|6553[0-5])(\.([1-5]\d{4}|[1-9]\d{0,3}|6[0-4]\d{3}|65[0-4]\d{2}|655[0-2]\d|6553[0-5]|0))?)$;
+};
+
+# TBD
+@(IsMandatory=false, DisplayName="Use Nexus Switch as Border Gateway", Section="Hidden")
+#@(IsMandatory=false, DisplayName="Use Nexus Switch as Border Gateway", Section="Border Gateway")
+boolean ENABLE_NX_BGW
+{
+defaultValue=true;
+};
+
+@(IsMandatory=false, DisplayName="Anycast Border Gateway advertise-pip", Section="Border Gateway", Description="To advertise Anycast Border Gateway PIP as VTEP. Effective on MSD fabric 'Recalculate Config'")
+boolean ANYCAST_BGW_ADVERTISE_PIP
+{
+defaultValue=false;
+};
+
+@(IsMandatory=false, DisplayName="Allow L3VNI w/o VLAN", Description="Whether allows L3 VNI configuration without VLAN configuration", Section="Border Gateway")
+boolean ALLOW_L3VNI_NO_VLAN
+{
+defaultValue=true;
+};
+
+@(IsMandatory=false, IsInternal=true)
+boolean ALLOW_L3VNI_NO_VLAN_PREV;
+
+@(IsMandatory=false, IsShow="ALLOW_L3VNI_NO_VLAN!=false", DisplayName="Enable L3VNI w/o VLAN", Description="L3 VNI configuration without VLAN configuration. This value is propagated on vrf creation as the default value of 'Enable L3VNI w/o VLAN' in vrf", Section="Border Gateway")
+boolean ENABLE_L3VNI_NO_VLAN
+{
+defaultValue=false;
+};
+
+#vPC
+@(IsMandatory=true, Description="VLAN range for vPC Peer Link SVI (Min:2, Max:4094)", DisplayName="vPC Peer Link VLAN Range", Section="Border Gateway")
+integerRange VPC_PEER_LINK_VLAN
+{
+min=2;
+max=4094;
+defaultValue=3600;
+};
+
+@(IsMandatory=false, DisplayName="Make vPC Peer Link VLAN as Native VLAN", Section="Border Gateway")
+boolean ENABLE_VPC_PEER_LINK_NATIVE_VLAN
+{
+defaultValue=false;
+};
+
+@(IsMandatory=true, Enum="loopback,management", Description="Use vPC Peer Keep Alive with Loopback or Management", DisplayName="vPC Peer Keep Alive option", Section="Border Gateway")
+string VPC_PEER_KEEP_ALIVE_OPTION
+{
+defaultValue=management;
+};
+
+@(IsMandatory=true, Description="(Min:240, Max:3600)", DisplayName="vPC Auto Recovery Time <br/>(In Seconds)", Section="Border Gateway")
+integer VPC_AUTO_RECOVERY_TIME
+{
+min = 240;
+max = 3600;
+defaultValue=360;
+};
+
+@(IsMandatory=true, Description="(Min:1, Max:3600)", DisplayName="vPC Delay Restore Time (In Seconds)", Section="Border Gateway")
+integer VPC_DELAY_RESTORE
+{
+min = 1;
+max = 3600;
+defaultValue=150;
+};
+
+@(IsMandatory=false, Description="(Min:1, Max:4096)", DisplayName="vPC Peer Link Port Channel ID", Section="Border Gateway")
+integerRange VPC_PEER_LINK_PO
+{
+min=1;
+max=4096;
+defaultValue=500;
+};
+
+@(IsMandatory=false, Description="Enable IPv6 ND synchronization between vPC peers", DisplayName="vPC IPv6 ND Synchronize", Section="Border Gateway")
+boolean VPC_ENABLE_IPv6_ND_SYNC
+{
+defaultValue=true;
+};
+
+@(IsMandatory=false, Description="For Primary VTEP IP Advertisement As Next-Hop Of Prefix Routes", DisplayName="vPC advertise-pip", Section="Border Gateway")
+boolean ADVERTISE_PIP_BGP
+{
+defaultValue=false;
+};
+
+@(IsMandatory=false, Description="vPC Domain id range to use for new pairings", DisplayName="vPC Domain Id Range", Section="Border Gateway")
+integerRange VPC_DOMAIN_ID_RANGE
+{
+min=1;
+max=1000;
+defaultValue=1-1000;
+};
+
+@(IsMandatory=false, IsShow="ENABLE_TRM==true && ALLOW_L3VNI_NO_VLAN==true",Description="MVPN VRI ID for vPC (Min:1, Max:65535)", DisplayName="MVPN VRI ID Range", Section="Border Gateway")
+integerRange MVPN_VRI_ID_RANGE;
+
+@(IsMandatory=false, IsShow="MVPN_VRI_ID_RANGE!=null", Description="One time VRI ID re-allocation based on 'MVPN VRI ID Range'", DisplayName="Enable MVPN VRI ID Re-allocation", Section="Border Gateway")
+boolean ENABLE_VRI_ID_REALLOC
+{
+defaultValue=false;
+};
+
+@(IsMandatory=false, DisplayName="Enable NX-API", Description="Enable HTTPS NX-API", Section="Border Gateway")
+boolean ENABLE_NXAPI
+{
+defaultValue=true;
+};
+
+@(IsMandatory=false, IsShow="ENABLE_NXAPI==true", DisplayName="NX-API HTTPS Port Number", Section="Border Gateway")
+integer NXAPI_HTTPS_PORT
+{
+min = 1;
+max = 65535;
+defaultValue=443;
+};
+
+@(IsMandatory=false, IsShow="ENABLE_NXAPI==true", DisplayName="Enable HTTP NX-API", Section="Border Gateway")
+boolean ENABLE_NXAPI_HTTP
+{
+defaultValue=true;
+};
+
+@(IsMandatory=false, IsShow="ENABLE_NXAPI_HTTP==true", DisplayName="NX-API HTTP Port Number", Section="Border Gateway")
+integer NXAPI_HTTP_PORT
+{
+min = 1;
+max = 65535;
+defaultValue=80;
+};
+
+@(IsMandatory=false, IsShow="ENABLE_DEFAULT_QUEUING_POLICY==false", Description="Qos on spines for guaranteed delivery of vPC Fabric Peering communication", DisplayName="Enable Qos for Fabric vPC-Peering", Section="Hidden")
+boolean FABRIC_VPC_QOS
+{
+defaultValue=false;
+};
+
+@(IsMandatory=true, IsShow="FABRIC_VPC_QOS==true", Description="Qos Policy name should be same on all spines", DisplayName="Qos Policy Name", Section="Hidden")
+string FABRIC_VPC_QOS_POLICY_NAME
+{
+minLength = 1;
+maxLength = 40;
+defaultValue=spine_qos_for_fabric_vpc_peering;
+};
+
+@(IsMandatory=false, DisplayName="Enable TCAM Allocation", Description="TCAM commands are automatically generated for VxLAN and vPC Fabric Peering when Enabled", Section="Border Gateway")
+boolean TCAM_ALLOCATION{
+defaultValue=true;
+};
+
+@(IsMandatory=false, IsShow="ENABLE_NX_BGW==true", IsMultiLineString=true, DisplayName="Nexus Border Gateway Freeform Config", Description="Additional CLIs For All Border Gateways As Captured From Show Running Configuration", Section="Border Gateway")
+string EXTRA_CONF_NX_BGW;
+
+@(IsMandatory=false, IsShow="ENABLE_NX_BGW==true", IsMultiLineString=true, DisplayName="Nexus Intra-fabric Links Additional Config", Description="Additional CLIs For All Intra-Fabric Links", Section="Border Gateway")
+string EXTRA_CONF_NX_INTRA_LINKS;
+
+@(IsMandatory=true, IsShow="ENABLE_NX_BGW==true",Enum="Enable,Disable", Description="Enable to clean switch configuration without reload when PreserveConfig=no", DisplayName="Greenfield Cleanup Option", Section="Border Gateway")
+string GRFIELD_DEBUG_FLAG
+{
+defaultValue=Disable;
+};
+
+@(IsMandatory=false, IsShow="FABRIC_VPC_QOS==false", DisplayName="Enable Default Queuing Policies", Section="Hidden")
+boolean ENABLE_DEFAULT_QUEUING_POLICY{
+defaultValue=false;
+};
+
+@(IsMandatory=true, Enum="vpc_peer_link", Description="vPC Peer-Link Configuration", DisplayName="vpc_peer_link", Section="Policy Templates", IsInternal=true)
+string temp_vpc_peer_link
+{
+defaultValue=int_vpc_peer_link_po;
+};
+
+@(IsMandatory=true, DisplayName="Overlay Mode", Description="VRF/Network configuration using config-profile or CLI, <br/>default is config-profile", IsInternal=true)
+enum OVERLAY_MODE
+{
+validValues=cli;
+defaultValue=cli;
+};
+
+@(IsMandatory=false, IsInternal=true)
+string TOPDOWN_CONFIG_RM_TRACKING;
+
+@(IsMandatory=false, IsInternal=true)
+integer SITE_ID_POLICY_ID;
+
+##
+##template content
+
+from com.cisco.dcbu.vinci.rest.services.jython import PTIWrapper as PTI
+from com.cisco.dcbu.vinci.rest.services.jython import Wrapper
+from com.cisco.dcbu.vinci.rest.services.jython import WrappersResp
+from com.cisco.dcbu.vinci.rest.services.jython import TopologyWrapper
+from com.cisco.dcbu.vinci.rest.services.jython import ResourceManagerWrapper as RM
+from com.cisco.dcbu.vinci.rest.services.jython import InterfaceManagerWrapper as IM
+from com.cisco.dcbu.vinci.rest.services.jython import InterfaceTypeEnum
+from com.cisco.dcbu.vinci.rest.services.jython import InventoryWrapper
+from com.cisco.dcbu.vinci.rest.services.jython import ImageManagementWrapper
+from com.cisco.dcbu.vinci.rest.services.jython import Helper
+from com.cisco.dcbu.vinci.rest.services.jython import FabricWrapper
+from com.cisco.dcbu.vinci.rest.services.jython import L4L7ServiceWrapper
+from com.cisco.dcbu.vinci.rest.services.jython import BackupRestoreWrapper as BRW
+from com.cisco.dcbu.vinci.rest.services.jython import ConfigDeployerWrapper as CDW
+from com.cisco.dcbu.vinci.rest.services.jython import InterfabricConnectionWrapper
+from com.cisco.dcbu.topdown.dao import CommonDAO
+from com.cisco.dcbu.commons.util import AppUtil
+
+from topology import *
+from utility import *
+
+import sys, traceback
+import re
+import json
+import copy
+
+def isValidOspfAreaIdIPString(ipStr):
+    ip = re.findall( r'''^[0-9]+(?:\.[0-9]+){3}$''', ipStr)
+    isValid = True
+    if len(ip) == 1:
+        # convert string to ints
+        ipInts = map(int, ip[0].split('.'))
+        for ipInt in ipInts:
+            if not ((ipInt >= 0) and (ipInt <= 255)):
+                isValid = False
+                break
+    else:
+        # not a valid IP address string
+        isValid = False
+    Wrapper.print("isValidOspfAreaIdIPString: FAB [%s]: OSPF Area Id IP String [%s]  isValid [%r]" % (FABRIC_NAME, ipStr, isValid))
+    return isValid
+
+def isValidBrownfieldNetworkFormat(netName):
+    # name format is valid if the following rules are satisfied
+    #   - must contain $$VNI$$
+    #   - must not contain any other $$var$$
+    #   - parts must not have any special chars besides '_' and '-' (Overlay network name restrictions)
+    failureReason = None
+    Wrapper.print("isValidBrownfieldNetworkFormat: netName [%s]" % (netName))
+
+    if ("$$VNI$$" not in netName):
+        failureReason = "Missing mandatory $$VNI$$ keyword"
+        return failureReason
+
+    specialCharChecker = re.compile(r'[^A-za-z0-9_-]')
+    parts = re.split(r'(\$\$[^$]+\$\$)', netName)
+    #Wrapper.print("isValidBrownfieldNetworkFormat: parts [%s]" % (parts))
+    for part in parts:
+        if not part or (part == ""):
+            continue
+        #Wrapper.print("isValidBrownfieldNetworkFormat: part [%s]" % (part))
+        if ((part.startswith('$$') and (part.endswith('$$')))):
+            #   - must not contain any other $$var$$
+            if ((part != '$$VNI$$') and (part != '$$VLAN_ID$$')):
+                failureReason = ("Invalid keyword in [%s]" % part)
+                break
+        else:
+            #   - parts must not have any special chars besides '_' and '-' (Overlay network name restrictions)
+            if specialCharChecker.search(part):
+                failureReason = ("Invalid charater in [%s]" % part)
+                break
+
+    return failureReason
+
+# returns True if change is allowed
+def checkBgpAsChange(respObj):
+    Wrapper.print("checkBgpAsChange: FAB [%s]: [%s] -> [%s]" % (FABRIC_NAME, BGP_AS_PREV, BGP_AS))
+    if (BGP_AS_PREV != BGP_AS):
+        overlayPresent = Util.exe(Helper.isOverlayExist(FABRIC_NAME))
+        if overlayPresent:
+            # cannot allow this change
+            respObj.addErrorReport("fabricInit",
+                "BGP ASN cannot be changed from [%s] to [%s] with existing overlays." % (BGP_AS_PREV, BGP_AS))
+            respObj.setFailureRetCode()
+            return False
+
+    return True
+
+# returns True if change is allowed
+def checkLinkProtocolTagChange(respObj):
+    Wrapper.print("checkLinkProtocolTagChange: FAB [%s]: [%s] -> [%s]" % (FABRIC_NAME, LINK_STATE_ROUTING_TAG, OSPF_PROCESS_ID))
+    if (LINK_STATE_ROUTING_TAG != OSPF_PROCESS_ID):
+        overlayPresent = Util.exe(Helper.isOverlayExist(FABRIC_NAME))
+        if overlayPresent:
+            # cannot allow this change
+            respObj.addErrorReport("fabricInit",
+                "OSPF Process Id cannot be changed from [%s] to [%s] with existing overlays." %
+                (LINK_STATE_ROUTING_TAG, OSPF_PROCESS_ID))
+            respObj.setFailureRetCode()
+            return False
+
+    return True
+
+def setFabricSettingValue(fabricSettings, key, value):
+    Wrapper.print("setFabricSettingValue: [%s] -> [%s]" % (key, value))
+    fabricSettings[key] = value
+    return True
+
+def preUpgrade(dictionaryObj):
+    funcName = sys._getframe(0).f_code.co_name
+    respObj = WrappersResp.getRespObj()
+    respObj.setSuccessRetCode()
+    upgFromVer = dictionaryObj.get("UPGRADE_FROM", "")
+    Wrapper.print("==========ACTION: FAB [%s]: Start: %s. keys = %d, UPGRADE_FROM = [%s]" % (FABRIC_NAME,
+                    funcName, len(dictionaryObj), upgFromVer))
+
+    try:
+        dictionaryObj["FABRIC_NAME"] = FABRIC_NAME
+        respObj = Util.exe(PTI.executePyTemplateMethod("fabric_upgrade_ios_xe", dictionaryObj, "preUpgradeExt"))
+
+    except respObjError as e:
+        respObj = e.value
+    finally:
+        Wrapper.print("==========ACTION: FAB [%s]: Finish: %s: Success = [%r]" %
+                (FABRIC_NAME, funcName, respObj.isRetCodeSuccess()))
+    return respObj
+
+def isInbandPoapEnabled(dictObj):
+    inbandMgmt = dictObj.get("INBAND_MGMT", "false")
+    bootstrapPOAPEnable = dictObj.get("BOOTSTRAP_ENABLE", "false")
+    return ("true" if (inbandMgmt == "true" and bootstrapPOAPEnable == "true") else "false")
+    
+def fabricInit(dictionaryObj):
+    global FABRIC_INTERFACE_TYPE, REPLICATION_MODE, FEATURE_PTP, VPC_DOMAIN_ID_RANGE, SITE_ID, BANNER
+    funcName = sys._getframe(0).f_code.co_name
+    Wrapper.print("==========ACTION: FAB [%s]: Start: %s" % (FABRIC_NAME, funcName))
+    respObj = WrappersResp.getRespObj()
+    respObj.setSuccessRetCode()
+
+    try:
+        Util.exe(actionAllow())
+
+        FabricWrapper.update(FABRIC_NAME, "FABRIC_TYPE", "Switch_Fabric")
+
+        fabricSettings = Util.exe(FabricWrapper.get(FABRIC_NAME)).getNvPairs()
+        bootstrapPOAPEnable = fabricSettings.get("BOOTSTRAP_ENABLE", "false")
+        bootstrapPOAPEnablePrev = fabricSettings.get("BOOTSTRAP_ENABLE_PREV", "false")
+        
+        failStr = isValidBrownfieldNetworkFormat(BROWNFIELD_NETWORK_NAME_FORMAT)
+        if failStr:
+            respObj.addErrorReport("fabricInit",
+                "The network name format [%s] used for Brownfield import is invalid. Reason - %s. Please refer to the documentation for additional information." %
+                (BROWNFIELD_NETWORK_NAME_FORMAT, failStr))
+            respObj.setFailureRetCode()
+            return respObj
+
+        # check the fabric wide links extra config
+        errCmd, adjFabricExtraLinkCfg = Util.getAdjustedIntfFreeformConfigIOSXE(EXTRA_CONF_XE_INTRA_LINKS)
+        if errCmd != "":
+            respObj.addErrorReport("fabricInit",
+                "The Intra fabric link interface freeform extra configuration must not contain the \'interface\' keyword. Please remove the command %s" %
+                (errCmd))
+            respObj.setFailureRetCode()
+            return respObj
+
+        errCmd, adjFabricExtraLinkCfgNx = Util.getAdjustedIntfFreeformConfig(EXTRA_CONF_NX_INTRA_LINKS)
+        if errCmd != "":
+            respObj.addErrorReport("fabricInit",
+                "The Nexus Intra fabric link interface freeform extra configuration must not contain the \'interface\' keyword. Please remove the command %s" %
+                (errCmd))
+            respObj.setFailureRetCode()
+            return respObj
+
+        # validate the OSPF Area ID
+        if OSPF_AREA_ID != "":
+            if not Util.isValidOspfAreaIdIPString(OSPF_AREA_ID):
+               respObj.addErrorReport("fabricInit",
+                "[%s] - Invalid OSPF Area ID IP String. Please make sure the IP address is valid and contains no white spaces." % OSPF_AREA_ID)
+               respObj.setFailureRetCode()
+               return respObj
+
+        # validate ANYCAST_GW_MAC
+        agw_mac = Util.normalizeMac(ANYCAST_GW_MAC)
+        if int(agw_mac[0:2], 16) & 0x01 != 0:
+            respObj.addErrorReport("fabricInit", "Anycast Gateway MAC needs to be unicast mac address. ")
+            respObj.setFailureRetCode()
+            return respObj
+
+    	#Validate BGP AS number
+        Util.exe(Helper.isValidAsn(BGP_AS))
+
+        if Util.normalizeMac(ANYCAST_GW_MAC) != Util.normalizeMac(ANYCAST_GW_MAC_PREV):
+            if ANYCAST_GW_MAC_PREV != "":
+                topologyDataObj = TopologyData(Util.exe(TopologyWrapper.get(FABRIC_NAME)))
+                leaves = topologyDataObj.get(TopologyInfoType.LEAVES)
+                borderLeaves = topologyDataObj.get(TopologyInfoType.BORDER_LEAVES)
+                devices = filter(None, leaves + borderLeaves)
+                overlayConfigPresent = False
+                for deviceSn in devices:
+                    if not CommonDAO.areOverlaysPresent(deviceSn):
+                        overlayConfigPresent = True
+                        break
+
+                if overlayConfigPresent:
+                    errorMsg = "Anycast Gateway MAC cannot be changed with overlay configurations already applied on switches."
+                    Wrapper.print("%s: %s" % (funcName, errorMsg))
+                    respObj.addErrorReport("fabricInit", errorMsg)
+                    respObj.setFailureRetCode()
+                    return respObj
+
+            FabricWrapper.update(FABRIC_NAME, "ANYCAST_GW_MAC_PREV", ANYCAST_GW_MAC)
+
+        if REPLICATION_MODE == "Multicast":
+            #Verify that mask length for multicast subnet is between 16 and 30
+            tokens = MULTICAST_GROUP_SUBNET.split("/")
+            if len(tokens) == 2:
+                prefix = int(tokens[1])
+                if prefix < 16 or prefix > 30:
+                    respObj.addErrorReport("fabricInit",
+                                           "Multicast subnet prefix length "
+                                           "supported is 16 - 30: Value: "
+                                           + str(prefix))
+                    respObj.setFailureRetCode()
+                    return respObj
+            else:
+                Wrapper.print("fabricInit: MULTICAST_GROUP_SUBNET: Tokens equal:" + str(len(tokens)))
+                respObj.addErrorReport("fabricInit",
+                                       "Multicast subnet invalid: "
+                                       + MULTICAST_GROUP_SUBNET)
+                respObj.setFailureRetCode()
+                return respObj
+
+            respObj = Helper.isValidIPv4MCAddress(MULTICAST_GROUP_SUBNET)
+            if respObj.isRetCodeFailure():
+                return respObj
+            else:
+                Wrapper.print("fabricInit: MC group subnet is Valid")
+        else:
+            Wrapper.print("fabricInit: Not validating MC/RP Subnet as mode is: " + REPLICATION_MODE)
+
+            if ENABLE_TRM == "true":
+                Wrapper.print("fabricInit: TRM can not be enabled while Replication Mode is Ingress")
+                respObj.addErrorReport("fabricInit", "TRM can not be enabled while Replication Mode is Ingress")
+                respObj.setFailureRetCode()
+                return respObj
+
+        if not checkBgpAsChange(respObj):
+            return respObj
+
+        if not checkLinkProtocolTagChange(respObj):
+            return respObj
+
+        # check loopback resource range
+        if STATIC_UNDERLAY_IP_ALLOC == "false":
+            if UNDERLAY_IS_V6 == "false":
+                ip0, mask0 = LOOPBACK0_IP_RANGE.split("/")
+                ip1, mask1 = LOOPBACK1_IP_RANGE.split("/")
+                if mask0 == "32" or mask1 == "32":
+                    errMsg = "Underlay Routing or VTEP Loopback IP Range Mask has to be smaller than 32. "
+                    respObj.addErrorReport("fabricInit", errMsg)
+                    respObj.setFailureRetCode()
+                if REPLICATION_MODE == "Multicast":
+                    ip2, mask2 = ANYCAST_RP_IP_RANGE.split("/")
+                    if mask2 == "32":
+                        errMsg = "Underlay RP Loopback IP Range Mask has to be smaller than 32. "
+                        respObj.addErrorReport("fabricInit", errMsg)
+                        respObj.setFailureRetCode()
+                if MPLS_HANDOFF == "true":
+                    ip, mask = MPLS_LOOPBACK_IP_RANGE.split("/")
+                    if mask == "32":
+                        errMsg = "MPLS Loopback IP Range Mask has to be smaller than 32. "
+                        respObj.addErrorReport("fabricInit", errMsg)
+                        respObj.setFailureRetCode()
+            else:
+                ip0, mask0 = LOOPBACK0_IPV6_RANGE.split("/")
+                ip1, mask1 = LOOPBACK1_IPV6_RANGE.split("/")
+                if mask0 == "128" or mask1 == "128":
+                    errMsg = "Underlay Loopback IPV6 Range Mask has to be smaller than 128."
+                    respObj.addErrorReport("fabricInit", errMsg)
+                    respObj.setFailureRetCode()
+
+            if respObj.isRetCodeFailure():
+                return respObj
+
+        # Multisite related check
+        # validate Site ID
+        # This is a non mandatory parameter and input can be the following:
+        #   > empty - in this case, we will set it to the BGP_AS
+        #   > X - if integer, need validaiton to make sure it is within the range
+        #   > X.Y - may or not be the same as BGP AS. Same validation rules as BGP ASN.
+        #   	     Update the fabric settings with the equivalent decimal value using siteId = (h * X) + Y
+        newSiteId = SITE_ID
+        updateSiteId = False
+        if SITE_ID == "":
+            Wrapper.print("%s: Setting Site ID to BGP_AS [%s]" % (funcName, BGP_AS))
+            newSiteId = BGP_AS
+
+        match = re.search('''\.''', newSiteId)
+        if match:
+            # Site ID is in the X.Y format
+            tokens = newSiteId.split('.')
+            if len(tokens) == 2:
+                # make sure the Site ID passes the BGP AS validation rules
+                rObj = Helper.isValidAsn(newSiteId)
+                if rObj.isRetCodeFailure():
+                   respObj.addErrorReport(funcName, "SITE ID is invalid. Please follow BGP AS number requirements.")
+                   respObj.setFailureRetCode()
+                   return respObj
+
+                newSiteId = str(int(65536 * int(tokens[0])) + int (tokens[1]))
+                Wrapper.print("%s: token1: [%s] token 2: [%s]. Site ID = [%s]" %(funcName, tokens[0], tokens[1], newSiteId))
+                updateSiteId = True
+        else:
+           match   = re.search('(^[0-9]+$)', newSiteId)
+           if match is None:
+               respObj.addErrorReport(funcName, "SITE ID is invalid. Valid values: <1-281474976710655>")
+               respObj.setFailureRetCode()
+               return respObj
+           else:
+               site_id_int = long(newSiteId)
+               if site_id_int < 1 or site_id_int > 281474976710655:
+                   respObj.addErrorReport(funcName, "SITE ID not valid. Valid values: <1-281474976710655>")
+                   respObj.setFailureRetCode()
+                   return respObj
+               elif SITE_ID != newSiteId:
+                   updateSiteId = True
+
+        Wrapper.print("%s: SITE_ID: [%s] newSiteId [%s] updateSiteId [%r]" %(funcName, SITE_ID, newSiteId, updateSiteId))
+        if updateSiteId:
+            SITE_ID = newSiteId
+            fabricSettings["SITE_ID"] = SITE_ID
+
+        try:
+            getRespObj = FabricWrapper.getParentFabricName(FABRIC_NAME)
+            if getRespObj.isRetCodeSuccess():
+                parentFabric = getRespObj.getValue()
+                msLoopbackId = Util.exe(FabricWrapper.get(parentFabric, "MS_LOOPBACK_ID"))
+                if msLoopbackId == BGP_LB_ID or msLoopbackId == NVE_LB_ID:
+                    errorMsg = ("Cannot change 'Underlay %s Loopback Id' to %s since "
+                        "it conflicts with 'Multi-site Routing Loopback Id' in parent fabric [%s]"
+                        % ("Routing" if msLoopbackId==BGP_LB_ID else "NVE", BGP_LB_ID if msLoopbackId==BGP_LB_ID else NVE_LB_ID, parentFabric))
+                    Wrapper.print("%s: %s" % (funcName, errorMsg))
+                    respObj.addErrorReport(funcName, errorMsg)
+                    respObj.setFailureRetCode()
+                    return respObj
+        except:
+            Wrapper.print("exception, ignore if not member fabric")
+            pass
+
+        pmEnable = fabricSettings.get("PM_ENABLE", "false")
+        pmEnablePrev = fabricSettings.get("PM_ENABLE_PREV", "false")
+        if pmEnable != pmEnablePrev:
+            turnOnPM = True if pmEnable == "true" else False
+            isFeatEnabled = Util.exe(FabricWrapper.isFeatureEnabled("pm"))
+            if isFeatEnabled:
+                FabricWrapper.enOrDisFabricPM(FABRIC_NAME, turnOnPM)
+            else:
+                pmForceUpd = "false" if fabricSettings.get("PM_FORCE_UPD", "true") == "true" else "true"
+                FabricWrapper.update(FABRIC_NAME,"PM_FORCE_UPD", pmForceUpd)
+                respObj.addErrorReport(funcName, "Performance Monitoring feature is not started. "
+                                       "Please start Performance Monitoring from Feature Management and retry this operation.")
+                respObj.setFailureRetCode()
+                return respObj
+
+        # validate BANNER
+        if BANNER.strip():
+            BANNER = BANNER.strip()
+            banner_len = len(BANNER)
+            # currently CC expects the XE delimiter to be always '^C'. So we allow user input to have either
+            # one char as delimiter, or "^C" as delimiter, and no '^' in message content
+            # TODO: after CC change, allow any one char as delimiter (no '^C' as delimiter)
+            if banner_len < 3 or (BANNER[-2:] == "^C" and banner_len < 5):
+                errorMsg = ("Banner field needs to be delimiter followed by non empty message ending with delimiter ")
+                Wrapper.print("%s: %s" % (funcName, errorMsg))
+                respObj.addErrorReport(funcName, errorMsg)
+                respObj.setFailureRetCode()
+                return respObj
+
+            if BANNER[0:2] == "^C" and banner_len > 4:
+                if BANNER[-2:] != "^C" and BANNER[-1] != "^":
+                    errorMsg = ("Banner field starting with '^C' as delimiter needs to end with '^C' or '^'")
+                    Wrapper.print("%s: %s" % (funcName, errorMsg))
+                    respObj.addErrorReport(funcName, errorMsg)
+                    respObj.setFailureRetCode()
+                    return respObj
+                if "^" in BANNER[2:-2] or (BANNER[-1] == "^" and BANNER[-2] == "^"):
+                    errorMsg = ("Banner field using '^C' as delimiter cannot have '^' inside banner message")
+                    Wrapper.print("%s: %s" % (funcName, errorMsg))
+                    respObj.addErrorReport(funcName, errorMsg)
+                    respObj.setFailureRetCode()
+                    return respObj
+            else:
+                if BANNER[0] != BANNER[-1]:
+                    errorMsg = ("Banner field's starting char '%s' and ending char '%s' do not match. Banner field needs to be delimiter followed by message ending with delimiter"%(BANNER[0], BANNER[-1]))
+                    Wrapper.print("%s: %s" % (funcName, errorMsg))
+                    respObj.addErrorReport(funcName, errorMsg)
+                    respObj.setFailureRetCode()
+                    return respObj
+                if BANNER[0] in BANNER[1:-1]:
+                    errorMsg = ("Banner field using '%s' as delimiter cannot have '%s' inside banner message" %(BANNER[0], BANNER[0]))
+                    Wrapper.print("%s: %s" % (funcName, errorMsg))
+                    respObj.addErrorReport(funcName, errorMsg)
+                    respObj.setFailureRetCode()
+                    return respObj
+
+                # To be removed if CC no longer requires to always use '^C' as delimiter for XE
+                if BANNER[0] != "^" and "^" in BANNER[1:-1]:
+                    errorMsg = ("Banner field cannot have '^' inside banner message")
+                    Wrapper.print("%s: %s" % (funcName, errorMsg))
+                    respObj.addErrorReport(funcName, errorMsg)
+                    respObj.setFailureRetCode()
+                    return respObj
+
+        fabricSettings["BGP_AS_PREV"] = BGP_AS
+        fabricSettings["LINK_STATE_ROUTING_TAG"] = OSPF_PROCESS_ID
+        if NXAPI_HTTPS_PORT == "":
+            fabricSettings["NXAPI_HTTPS_PORT"] = "443"
+        if NXAPI_HTTP_PORT == "":
+            fabricSettings["NXAPI_HTTP_PORT"] = "80"
+        fabricSettings["BOOTSTRAP_ENABLE_PREV"] = bootstrapPOAPEnable
+        fabricSettings["PM_ENABLE_PREV"] = pmEnable
+        if VPC_DOMAIN_ID_RANGE == "":
+            VPC_DOMAIN_ID_RANGE = "1-1000"
+            fabricSettings["VPC_DOMAIN_ID_RANGE"] = VPC_DOMAIN_ID_RANGE
+        # show the example if DHCP is enabled later
+        if DHCP_ENABLE == "true" and DHCP_IPV6_ENABLE == "":
+            fabricSettings["DHCP_IPV6_ENABLE"] = "DHCPv4"
+            fabricSettings["MGMT_PREFIX"] = "24"
+        if DHCP_ENABLE != "true" and BOOTSTRAP_MULTISUBNET == "":
+            fabricSettings["BOOTSTRAP_MULTISUBNET"] = "#Scope_Start_IP, Scope_End_IP, Scope_Default_Gateway, Scope_Subnet_Prefix"
+
+        FabricWrapper.update(FABRIC_NAME, fabricSettings)
+
+        if (AUTO_UNIQUE_VRF_LITE_IP_PREFIX != "true" and 
+            AUTO_UNIQUE_VRF_LITE_IP_PREFIX_PREV != "true" and
+            PER_VRF_LOOPBACK_AUTO_PROVISION != "true" and
+            PER_VRF_LOOPBACK_AUTO_PROVISION_PREV != "true" and
+            PER_VRF_LOOPBACK_AUTO_PROVISION_V6 != "true" and
+            PER_VRF_LOOPBACK_AUTO_PROVISION_V6_PREV != "true" and
+            TOPDOWN_CONFIG_RM_TRACKING != "completed"):
+            Util.exe(FabricWrapper.update(FABRIC_NAME, "TOPDOWN_CONFIG_RM_TRACKING", "notstarted"))
+
+        autoVrfLiteUniqIp = fabricSettings.get("AUTO_UNIQUE_VRF_LITE_IP_PREFIX", "false")
+        autoVrfLiteUniqIpPrev = fabricSettings.get("AUTO_UNIQUE_VRF_LITE_IP_PREFIX_PREV", "false")
+        if autoVrfLiteUniqIpPrev != autoVrfLiteUniqIp:
+            Util.exe(FabricWrapper.update(FABRIC_NAME, "AUTO_UNIQUE_VRF_LITE_IP_PREFIX_PREV", autoVrfLiteUniqIp))
+            if TOPDOWN_CONFIG_RM_TRACKING == "completed" and autoVrfLiteUniqIp == "true":
+                Util.exe(FabricWrapper.update(FABRIC_NAME, "TOPDOWN_CONFIG_RM_TRACKING", "restart"))
+
+        pervrfLbProv = fabricSettings.get("PER_VRF_LOOPBACK_AUTO_PROVISION", "false")
+        pervrfLbProvPrev = fabricSettings.get("PER_VRF_LOOPBACK_AUTO_PROVISION_PREV", "false")
+        if pervrfLbProvPrev != pervrfLbProv:
+            Util.exe(FabricWrapper.update(FABRIC_NAME, "PER_VRF_LOOPBACK_AUTO_PROVISION_PREV", pervrfLbProv))
+        
+        # try except could be removed once we start supporting it in campus 
+        try:
+            pervrfLb6Prov = fabricSettings.get("PER_VRF_LOOPBACK_AUTO_PROVISION_V6", "false")
+            pervrfLb6ProvPrev = fabricSettings.get("PER_VRF_LOOPBACK_AUTO_PROVISION_V6_PREV", "false")
+            if pervrfLb6ProvPrev != pervrfLb6Prov:
+                Util.exe(FabricWrapper.update(FABRIC_NAME, "PER_VRF_LOOPBACK_AUTO_PROVISION_V6_PREV", pervrfLbProv))
+        except:
+            pass
+
+        # dhcp initialization for DHCP IPs provided in bootstrap section.
+        dict = getGlobals(dictionaryObj)
+        Util.exe(dhcpInit(dict))
+        dynamicIPPoolsEnable = True
+        try:
+            if STATIC_UNDERLAY_IP_ALLOC == "true":
+                dynamicIPPoolsEnable = False
+        except:
+            pass
+
+        # Initialization of resource manager for Underlay Resources.
+        if dynamicIPPoolsEnable:
+            if UNDERLAY_IS_V6 == "false":
+                checkIfDuplicatePools(respObj)
+                Util.exe(RM.addOrUpdatePoolData(FABRIC_NAME, PoolName.SUBNET, PoolType.SUBNET, SUBNET_RANGE, SUBNET_TARGET_MASK))
+                Util.exe(RM.addOrUpdatePoolData(FABRIC_NAME, "LOOPBACK0_IP_POOL", PoolType.IP, LOOPBACK0_IP_RANGE))
+                Util.exe(RM.addOrUpdatePoolData(FABRIC_NAME, "LOOPBACK1_IP_POOL", PoolType.IP, LOOPBACK1_IP_RANGE))
+                Util.exe(RM.addOrUpdatePoolData(FABRIC_NAME, "ANYCAST_RP_IP_POOL", PoolType.IP, ANYCAST_RP_IP_RANGE))
+                if MPLS_HANDOFF == "true":
+                    Util.exe(RM.addOrUpdatePoolData(FABRIC_NAME, "MPLS_LOOPBACK_IP_POOL", PoolType.IP, MPLS_LOOPBACK_IP_RANGE))
+                else:
+                    Util.exe(RM.addOrUpdateEmptyPool(FABRIC_NAME, "MPLS_LOOPBACK_IP_POOL", PoolType.IP))
+            else:
+                checkIfDuplicateV6Pools(respObj)
+                if USE_LINK_LOCAL == "false":
+                    Util.exe(RM.addOrUpdatePoolData(FABRIC_NAME, PoolName.SUBNET, PoolType.SUBNET, V6_SUBNET_RANGE, V6_SUBNET_TARGET_MASK))
+                else:
+                    Util.exe(RM.addOrUpdateEmptyPool(FABRIC_NAME, PoolName.SUBNET, PoolType.SUBNET))
+                Util.exe(RM.addOrUpdatePoolData(FABRIC_NAME, "LOOPBACK0_IP_POOL", PoolType.IP, LOOPBACK0_IPV6_RANGE))
+                Util.exe(RM.addOrUpdatePoolData(FABRIC_NAME, "LOOPBACK1_IP_POOL", PoolType.IP, LOOPBACK1_IPV6_RANGE))
+                Util.exe(RM.addOrUpdatePoolData(FABRIC_NAME, "ROUTER_ID_POOL", PoolType.IP, ROUTER_ID_RANGE))
+        else:
+            # init IP pools to be empty. The IP addresses are expected to be explicitly set in RM offline
+            Wrapper.print("fabricInit: Init Empty Subnet Pool - PoolName.SUBNET")
+            Util.exe(RM.addOrUpdateEmptyPool(FABRIC_NAME, PoolName.SUBNET, PoolType.SUBNET))
+            Wrapper.print("fabricInit: Init Empty IP Pool - LOOPBACK0_IP_POOL")
+            Util.exe(RM.addOrUpdateEmptyPool(FABRIC_NAME, "LOOPBACK0_IP_POOL", PoolType.IP))
+            Wrapper.print("fabricInit: Init Empty IP Pool - LOOPBACK1_IP_POOL")
+            Util.exe(RM.addOrUpdateEmptyPool(FABRIC_NAME, "LOOPBACK1_IP_POOL", PoolType.IP))
+            if UNDERLAY_IS_V6 == "false":
+                Wrapper.print("fabricInit: Init Empty IP Pool - ANYCAST_RP_IP_POOL")
+                Util.exe(RM.addOrUpdateEmptyPool(FABRIC_NAME, "ANYCAST_RP_IP_POOL", PoolType.IP))
+                if MPLS_HANDOFF == "true":
+                    Wrapper.print("fabricInit: Init Empty IP Pool - MPLS_LOOPBACK_IP_POOL")
+                    Util.exe(RM.addOrUpdateEmptyPool(FABRIC_NAME, "MPLS_LOOPBACK_IP_POOL", PoolType.IP))
+            else:
+                Wrapper.print("fabricInit: Init Empty IP Pool - ROUTER_ID_POOL")
+                Util.exe(RM.addOrUpdateEmptyPool(FABRIC_NAME, "ROUTER_ID_POOL", PoolType.IP))
+
+        if DCI_SUBNET_RANGE != "":
+            Util.exe(RM.addOrUpdatePoolData(FABRIC_NAME, "DCI subnet pool",
+                                            PoolType.SUBNET, DCI_SUBNET_RANGE,
+                                            DCI_SUBNET_TARGET_MASK))
+        else:
+            Util.exe(RM.addOrUpdateEmptyPool(FABRIC_NAME, "DCI subnet pool",
+                                             PoolType.SUBNET))
+            Wrapper.print("Empty DCI Subnet range, ignore")
+
+        # Initialize an empty DCI subnet pool for IPv6
+        Util.exe(RM.addOrUpdateEmptyPool(FABRIC_NAME, "IPv6 DCI subnet pool", PoolType.SUBNET))
+
+        # Initialization of resource manager for Overlay and Underlay Resources (port-channel and other IDs).
+        # PC ID pool should be 1-499, 501-4096 once RM get/set is working with range.
+        # 500 is default for underlay - vpc peer link port-channel and vpc id
+        Util.exe(RM.addOrUpdatePoolData(FABRIC_NAME, "PORT_CHANNEL_ID", "501-4000"))
+        Util.exe(RM.addOrUpdatePoolData(FABRIC_NAME, "FEX_ID", "101-199"))
+
+        Util.exe(RM.addOrUpdatePoolData(FABRIC_NAME, "VPC_ID", "1-100, 200-499"))
+        Util.exe(RM.addOrUpdatePoolData(FABRIC_NAME, "VPC_DOMAIN_ID", VPC_DOMAIN_ID_RANGE))
+        Util.exe(RM.addOrUpdatePoolData(FABRIC_NAME, "VPC_PEER_LINK_VLAN", VPC_PEER_LINK_VLAN))
+
+        # Loopback pool should be 2-199, 201-1000 once RM get/set is working with range.
+        # 0,1,254,255 reserved for underlay - bgp, nve, border gateway, anycast rp loopbacks
+        Util.exe(RM.addOrUpdatePoolData(FABRIC_NAME, "LOOPBACK_ID", "0-512"))
+
+        # Initialization of resource manager for Overlay Resources.
+        Util.exe(RM.addOrUpdatePoolData(FABRIC_NAME, "TOP_DOWN_L3_DOT1Q", SUBINTERFACE_RANGE))
+        Util.exe(RM.addOrUpdatePoolData(FABRIC_NAME, "TOP_DOWN_NETWORK_VLAN", NETWORK_VLAN_RANGE))
+        Util.exe(RM.addOrUpdatePoolData(FABRIC_NAME, "TOP_DOWN_VRF_VLAN", VRF_VLAN_RANGE))
+
+        Util.exe(RM.addOrUpdatePoolData(FABRIC_NAME, "BGP_ASN_ID", PoolType.ID, BGP_AS))
+        Util.exe(RM.addOrUpdatePoolData(FABRIC_NAME, "L3_VNI", L3_PARTITION_ID_RANGE))
+        Util.exe(RM.addOrUpdatePoolData(FABRIC_NAME, "L2_VNI", L2_SEGMENT_ID_RANGE))
+        Util.exe(RM.addOrUpdateOverlapPool(FABRIC_NAME, "MCAST_IP_POOL", PoolType.IP, MULTICAST_GROUP_SUBNET))
+        Util.exe(RM.addOrUpdatePoolData(FABRIC_NAME, "VRF_INSTANCE_ID","ID_POOL","1-1000"));
+
+        #Util.exe(RM.addOrUpdatePoolData(FABRIC_NAME, "INSTANCE_ID", L2VPN_INSTANCE_RANGE))
+        Util.exe(RM.addOrUpdatePoolData(FABRIC_NAME, "PORT_CHANNEL_ID_IOS_XE", "1-128"))
+
+        if (ENABLE_TRM == "true" and ALLOW_L3VNI_NO_VLAN == "true"):
+            if MVPN_VRI_ID_RANGE == "":
+                fabricId = AppUtil.getFabricId(FABRIC_NAME)
+                startingRange = fabricId%64
+                if (startingRange == 0):
+                    vriRange = "1-999"
+                else:
+                    vriRange = str(startingRange) + "000-" + str(startingRange) + "999"
+
+                FabricWrapper.update(FABRIC_NAME,"MVPN_VRI_ID_RANGE", vriRange)
+                Wrapper.print("%s[%s] fabricId %s, vriRange %s"%(funcName, FABRIC_NAME, fabricId, vriRange))
+            else:
+                vriRange = MVPN_VRI_ID_RANGE
+            Util.exe(RM.addOrUpdatePoolData(FABRIC_NAME, "MVPN_VRI_ID", vriRange))
+
+        dict = {"FABRIC_NAME": FABRIC_NAME}
+        Util.exe(PTI.executePyTemplateMethod("fabric_utility_11_1", dict, "checkL3VniNoVlanSettings"))
+        Util.processRespObj(respObj, PTI.executePyTemplateMethod("fabric_utility_11_1", dict, "siteIdTracking"))
+        if respObj.isRetCodeFailure():
+            return respObj
+
+        if ALLOW_L3VNI_NO_VLAN != ALLOW_L3VNI_NO_VLAN_PREV:
+            Util.exe(FabricWrapper.update(FABRIC_NAME, "ALLOW_L3VNI_NO_VLAN_PREV", ALLOW_L3VNI_NO_VLAN))
+
+        Wrapper.print("==========ACTION: Saving current running configuration")
+        Util.exe(BRW.CreateBackUpJob(FABRIC_NAME, enableRealTimeBackup, enableScheduledBackup, scheduledTime))
+        Wrapper.print("==========ACTION: Created job for current running configuration")
+        respObj.setSuccessRetCode()
+    except respObjError as e:
+        respObj = e.value
+    finally:
+        Wrapper.print("==========ACTION: FAB [%s]: Finish: fabricInit: Success = [%r]" %
+                      (FABRIC_NAME, respObj.isRetCodeSuccess()))
+    return respObj
+
+#initialize DHCP scope in dchp.conf for bootstrapped devices for automatic IP assignments
+def dhcpInit(dictionaryObj):
+    funcName = sys._getframe(0).f_code.co_name
+    Wrapper.print("==========ACTION: FAB [%s]: Start: %s" % (FABRIC_NAME, funcName))
+    respObj = WrappersResp.getRespObj()
+    respObj.setSuccessRetCode()
+    try:
+        respObj = PTI.executePyTemplateMethod("dhcp_common", getGlobals(dictionaryObj), "dhcpInit")
+    except respObjError as e:
+        respObj = e.value
+    finally:
+        Wrapper.print("==========ACTION: FAB [%s]: Finish: %s: Success = [%r]" % \
+                    (FABRIC_NAME, funcName, respObj.isRetCodeSuccess()))
+    return respObj
+
+def getFabErrEntity(fnName, entityName=None):
+    if entityName:
+        return fnName + ":" + entityName
+    else:
+        return fnName
+
+def getStrGlobals():
+    newDict = {}
+    gDict = globals()
+    for key in gDict.keys():
+        if type(gDict[key]) is str:
+            newDict[key] = gDict[key]
+    return newDict
+
+def actionAllow():
+    Wrapper.print("actionAllow: FAB [%s]: FF [%s]" % (FABRIC_NAME, FF))
+    r = WrappersResp.getRespObj()
+    r.setSuccessRetCode()
+    try:
+        extFabricType = EXT_FABRIC_TYPE
+    except:
+        extFabricType = ""
+
+    #Validate Fabric Family to limit fabric edits between different fabric types
+    if FF != "Easy_Fabric_IOS_XE":
+        fabricType = Util.mapFFToFabricType(FF, extFabricType)
+        article = "An" if fabricType[0].lower() in ['a','e','i','o','u'] else "A"
+        r.addErrorReport("actionAllow", "%s %s fabric may not be converted to a Campus VXLAN EVPN fabric "
+                         "as that may cause configuration issues. Please revert the fabric to %s and save." %
+                         (article, fabricType, fabricType))
+        r.setFailureRetCode()
+    return r
+
+def preAdd(dictionaryObj):
+    Wrapper.print("==========ACTION: FAB [%s]: Start: preAdd: Serial [%s]" %
+        (FABRIC_NAME, dictionaryObj["deviceSerial"]))
+    funcName = sys._getframe(0).f_code.co_name
+    respObj = WrappersResp.getRespObj()
+    respObj.setSuccessRetCode()
+    try:
+        # need to allocate below new object using wrapper to return response of success/failure to GUI.
+        # by default below API sets retCode to SUCCESS
+        Util.exe(actionAllow())
+
+        Wrapper.print("==========preAdd: Fabric Name = %s, keys = %d, Device Serial = %s, Device Model = %s, Preserve Config = %s" %
+                      (FABRIC_NAME, len(dictionaryObj), dictionaryObj["deviceSerial"],  dictionaryObj["deviceModel"],
+                       dictionaryObj["devicePreserveConfig"]))
+        dict = getGlobals(dictionaryObj)
+
+        # TBD, remove the comment below
+        dict["devicePreserveConfig"] = False
+        respObj = Util.exe(preAddExt(dict))
+        return respObj
+    except respObjError as e:
+        respObj = e.value
+        return respObj
+    finally:
+        Wrapper.print("==========ACTION: FAB [%s]: Finish: preAdd: Serial [%s]. Success = [%r]" %
+                (FABRIC_NAME, dictionaryObj["deviceSerial"], respObj.isRetCodeSuccess()))
+
+def preAddExt(gVarDictObj):
+    respObj = WrappersResp.getRespObj()
+    respObj.setSuccessRetCode()
+    try:
+        devSerial = gVarDictObj["deviceSerial"]
+        isPreserveConfigSet = gVarDictObj["devicePreserveConfig"]
+        Wrapper.print("==========preAddExt: Fabric = %s, Serial [%s], Model [%s], # keys = [%d] Preserve = %s" %
+                      (gVarDictObj["FABRIC_NAME"], devSerial, gVarDictObj["deviceModel"], len(gVarDictObj), isPreserveConfigSet))
+
+        if (not gVarDictObj["deviceModel"].startswith("C9")) and (not gVarDictObj["deviceModel"].startswith("CSR")) and (not gVarDictObj["deviceModel"].startswith("N9")) :
+            respObj.addErrorReport(getFabErrEntity(preAddExt.__name__, devSerial),
+                    "Switch %s: Model %s is incompatible. Easy_Fabric_IOS_XE only supports Switch model starting with 'C9' or 'N9'. " %(devSerial, gVarDictObj["deviceModel"]))
+            respObj.setFailureRetCode()
+            return respObj
+
+        Wrapper.print("Done with preAddExt")
+        respObj.setValue(respObj)
+        return respObj
+    except respObjError as e:
+        return e.value
+
+def getGlobals(additionalDict=None):
+    newDict = {}
+    gDict = globals()
+    for key in gDict.keys():
+        if ((type(gDict[key]) is str) or
+            (type(gDict[key]) is dict)):
+            newDict[key] = gDict[key]
+    if additionalDict:
+        newDict.update(additionalDict)
+    return newDict
+
+def getOptSSHConnection(devSerial):
+    funcName = sys._getframe(0).f_code.co_name
+    respObj = WrappersResp.getRespObj()
+    respObj.setSuccessRetCode()
+    try:
+        sshObj = Util.exe(InventoryWrapper.getVSHConnection(devSerial))
+        respObj.setValue(sshObj)
+        return respObj
+    except Exception as e:
+        Wrapper.print("%s(): Failed to get SSH connection for : [%s] [%s]. Will skip" % 
+                      (funcName, devSerial, str(e)))
+        respObj.addErrorReport(getFabErrEntity(funcName, devSerial+":SSH"),
+                               "Failed to get SSH connection. "
+                               "Please ensure LAN credentials and try Recalculate Config", devSerial)
+        respObj.setFailureRetCode()
+        return respObj
+
+def preChangeDiscoveryIP(dictionaryObj):
+    funcName = sys._getframe(0).f_code.co_name
+    Wrapper.print("==========ACTION: FAB [%s]: Start: %s" % (FABRIC_NAME, funcName))
+    respObj = WrappersResp.getRespObj()
+    respObj.setSuccessRetCode()
+    Util.exe(actionAllow())
+    try:
+        dict = getGlobals(dictionaryObj)
+        respObj = PTI.executePyTemplateMethod("fabric_upgrade_11_1", dict, "doPreChangeDiscoveryIP")
+    except Exception as e:
+        msg = ("Unexpected error during change discovery IP handling")
+        if isinstance(e, respObjError):
+            respObj.addErrorReport(getFabErrEntity(funcName), msg)
+            respObj.setFailureRetCode()
+            Util.processRespObj(respObj, e.value)
+        else:
+            Util.handleException(msg, e, respObj)
+    finally:
+        Wrapper.print("==========ACTION: FAB [%s]: Finish: %s: Success = [%r]" % (FABRIC_NAME, funcName, respObj.isRetCodeSuccess()))
+        return respObj
+
+def postAdd(dictionaryObj):
+    Wrapper.print("==========ACTION: FAB [%s]: Start: postAdd: Serial [%s]" %
+            (FABRIC_NAME, dictionaryObj["deviceSerial"]))
+    respObj = WrappersResp.getRespObj()
+    respObj.setSuccessRetCode()
+    try:
+        dict = getGlobals(dictionaryObj)
+        # TBD remove the follow after UI fix
+        dict["devicePreserveConfig"] = False
+        topologyDataObj = TopologyData(Util.exe(TopologyWrapper.get(FABRIC_NAME)))
+        model = topologyDataObj.getSwitchModel(dictionaryObj["deviceSerial"])
+        if Util.isIOSXEDevice(dictionaryObj["deviceSerial"], model):
+            respObj = Util.exe(PTI.executePyTemplateMethod("fabric_upgrade_ios_xe", dict, "postAddExtIOSXE"))
+        else:
+            respObj = Util.exe(PTI.executePyTemplateMethod("fabric_upgrade_11_1", dict, "postAddExt"))
+        return respObj
+    except respObjError as e:
+        respObj = e.value
+        return respObj
+    finally:
+        Wrapper.print("==========ACTION: FAB [%s]: Finish: postAdd: Serial [%s]. Success = [%r]" %
+                (FABRIC_NAME, dictionaryObj["deviceSerial"], respObj.isRetCodeSuccess()))
+
+def getIntegerRange(rangeStr):
+    return sum(((list(range(*[int(j) + k for k,j in enumerate(i.split('-'))]))
+                        if '-' in i else [int(i)]) for i in rangeStr.split(',')), [])
+
+def bootstrapDevice(dictionaryObj):
+    funcName = sys._getframe(0).f_code.co_name
+    Wrapper.print("==========ACTION: FAB [%s]: Start: %s, dictionaryObj %s" % (FABRIC_NAME, funcName, str(dictionaryObj)))
+    respObj = WrappersResp.getRespObj()
+    respObj.setSuccessRetCode()
+    try:
+        Util.exe(actionAllow())
+        dict = getGlobals(dictionaryObj)
+        devices = dictionaryObj["bootstrapDevices"]
+        numDevicesToBootstrap = len(devices)
+        fabricSettings = Util.exe(FabricWrapper.get(FABRIC_NAME)).getNvPairs()
+        dcnmUser = fabricSettings.get("dcnmUser", "")
+        inbandPOAPEnable = isInbandPoapEnabled(fabricSettings)
+        Wrapper.print("%s: Fabric [%s]: inbandPOAPEnable [%s] dcnmUser [%s] Num devices [%d]" % (funcName, 
+                        FABRIC_NAME, inbandPOAPEnable, dcnmUser, numDevicesToBootstrap))
+
+        for i in range(numDevicesToBootstrap):
+            Wrapper.print("Fabric [%s]: Attempting Bootstrap for Switch [%s] - #%d of %d" %(FABRIC_NAME,
+                                        devices[i].serialNumber, i+1, numDevicesToBootstrap))
+
+        Wrapper.print("%s: SHYAM Sending dictionary obj %s for fabric %s" %(funcName, FABRIC_NAME, str(dict)))
+        newRespObj = PTI.executePyTemplateMethod("dhcp_common", dict, "bootstrapDevice")
+        processRespObj(respObj, newRespObj)
+        if inbandPOAPEnable == "true":
+            if newRespObj.isRetCodeFailure():
+                # bootstrap for some switches failed... log them here. Fabric errors must already be present from earlier call
+                failedSwitchSerials = newRespObj.getValue()
+                numDevices = len(failedSwitchSerials)
+                i = 0
+                for serial in failedSwitchSerials:
+                    Wrapper.print("Fabric [%s]: Bootstrap failed for Switch [%s] - #%d of %d" % (FABRIC_NAME, serial, ++i, numDevices))
+
+                devicesToContinue = []
+                for i in range(numDevicesToBootstrap):
+                    if devices[i].serialNumber not in failedSwitchSerials:
+                        devicesToContinue.append(copy.deepcopy(devices[i]))
+            else:
+                devicesToContinue = devices
+
+            if len(devicesToContinue):
+                dictionaryObj["bootstrapDevices"] = devicesToContinue
+                # Additional processing for inband POAP
+                #Should call configSave to generate the full startup config of the switch being bootstrapped
+                processRespObj(respObj, configSaveInband(dict))
+    except respObjError as e:
+        respObj = e.value
+    finally:
+        Wrapper.print("==========ACTION: FAB [%s]: Finish: %s: Success = [%r]" % (FABRIC_NAME, 
+                                                            funcName, respObj.isRetCodeSuccess()))
+    return respObj
+
+def preFabricDelete(dictionaryObj):
+    Wrapper.print("==========ACTION: FAB [%s]: Start: preFabricDelete" % (FABRIC_NAME))
+    respObj = WrappersResp.getRespObj()
+    respObj.setSuccessRetCode()
+    #check switches
+    try:
+        Util.exe(actionAllow())
+        topologyDataObj = TopologyData(Util.exe(TopologyWrapper.get(FABRIC_NAME)))
+        devices = topologyDataObj.get(TopologyInfoType.SWITCHES)  # all devices serial number
+        devices = filter(None, devices)
+        Wrapper.print("PFD: Found %d Switches" % len(devices))
+        if (len(devices) > 0):
+            respObj.addErrorReport(getFabErrEntity(preFabricDelete.__name__),
+                                   "Fabric cannot be deleted with switches present. "
+                                   "Please check the Switches page to make sure "
+                                   "there are no switch entries and retry.")
+            respObj.setFailureRetCode()
+            return respObj
+
+        try:
+            if SITE_ID_POLICY_ID != "":
+                policyId, rmId = SITE_ID_POLICY_ID.split(".")
+                PTIWrapper.deletePtiVsRMForPolicyId(int(policyId))
+                # free RM in case it was allocated for MSD, which will not be freed in deleteFabricResources
+                if rmId:
+                    Util.exeRM(RM.deleteResource(int(rmId)))
+        except:
+            pass
+
+        RM.deleteFabricResources(FABRIC_NAME)
+        dictionaryObj["FABRIC_NAME"] = FABRIC_NAME
+        PTI.executePyTemplateMethod("dhcp_utility", dictionaryObj, "deleteDHCPScopeV6")
+        PTI.executePyTemplateMethod("dhcp_utility", dictionaryObj, "deleteDHCPScope")
+        return respObj
+    except respObjError as e:
+        respObj = e.value
+        return respObj
+    finally:
+        Wrapper.print("==========ACTION: FAB [%s]: Finish: preFabricDelete: Success = [%r]" %
+                (FABRIC_NAME, respObj.isRetCodeSuccess()))
+#preSwitchDelete - PSD#
+def preSwitchDelete(dictionaryObj):
+    respObj = WrappersResp.getRespObj()
+    respObj.setSuccessRetCode()
+    funcName = sys._getframe(0).f_code.co_name
+    try:
+      forceDelete = dictionaryObj.get("force", False)
+      deleteSwitch = True
+      if ("notDeleteSwitch" in dictionaryObj):
+          deleteSwitch = False
+          Fabric_name = dictionaryObj["FABRIC_NAME"]
+      else:
+          Fabric_name = FABRIC_NAME
+          Util.exe(actionAllow())
+      Wrapper.print("==========ACTION: FAB [%s]: Start: preSwitchDelete. Serial [%s], deleteSwitch [%s]" %
+                    (Fabric_name, dictionaryObj["deviceSerial"], deleteSwitch))
+
+      sn = dictionaryObj["deviceSerial"]
+      topologyDataObj = TopologyData(Util.exe(TopologyWrapper.get(Fabric_name)))
+      isVPC = Util.exe(VpcWrapper.isVpc(Fabric_name, sn))
+      switchRole = topologyDataObj.getSwitchRole(sn)
+      hostName = Util.exe(InventoryWrapper.getHostName(sn))
+
+      Wrapper.print("%s[%s]: Role [%s] isVPC [%s]" % (sn, hostName, switchRole, isVPC))
+
+      dictObj = getGlobals(dictionaryObj)
+      dictObj["SRNO"] = sn
+      dictObj["FABRIC_NAME"] = Fabric_name
+      dictObj["topologyObj"] = topologyDataObj
+
+      FF = dictObj.get("FF", "Easy_Fabric_IOS_XE")
+      if FF == "Easy_Fabric_IOS_XE":
+          Wrapper.print("Easy Fabric template")
+          
+          # check whether service has been enabled
+          if "border" in switchRole or "leaf" in switchRole:
+              """
+              resp = L4L7ServiceWrapper.serviceNetworkAttached(sn, True)
+              if resp.isRetCodeSuccess() and resp.getValue():
+                    respObj = WrappersResp.getRespObj()
+                    respObj.addErrorReport("SwitchRemoval", ("There are service networks being attached to this switch (or its peer switch). Please detach the service networks and deploy the changes (detach service networks) before removing this switch."), sn)
+                    respObj.setFailureRetCode()
+                    return respObj   
+              else:
+                  Wrapper.print("%s(): No service network is attached, so proceed to validate the pre-deletion of switch [%s]" % (funcName, sn))                    
+              """
+          SSPINE_ADD_DEL_DEBUG_FLAG = Util.exe(FabricWrapper.get(Fabric_name)).nvPairs.get("SSPINE_ADD_DEL_DEBUG_FLAG","Disable")
+          REPLICATION_MODE = str(Util.exe(FabricWrapper.get(Fabric_name, "REPLICATION_MODE")))
+          if "super" in switchRole:
+              Wrapper.print("Easy Fabric Super in role %s"%(switchRole))
+              spinesWithSuperRole = topologyDataObj.get(TopologyInfoType.SPINES_WITH_SUPER_ROLE)
+              spines = topologyDataObj.get(TopologyInfoType.SPINES)
+
+              Wrapper.print("Easy Fabric Super role in spines count %s and normal spines count %s"%(len(spinesWithSuperRole),len(spines)))
+              if len(spinesWithSuperRole) == 1 and len(spines) > 0:
+                  if SSPINE_ADD_DEL_DEBUG_FLAG == "Disable":
+                      respObj.addWarnReport(getFabErrEntity(funcName, sn+":super spine delete"),
+                                            "This is the last spine with 'SUPER' role in the fabric. "
+                                            "After deletion of this switch, performing Save&Deploy will create the spine-leaf bgp peering "
+                                            "and super spine role addition will not be allowed again", sn)
+                      respObj.setWarningRetCode()
+
+      #Delete all overlays on border switches before IFCs are deleted
+      if "border" == switchRole or "border spine" == switchRole or "border super spine" == switchRole:
+          Util.exe(validateInterfabricDelete(sn, forceDelete))
+          ptiList = Util.exe(PTIWrapper.get(sn))
+          Wrapper.print("Count is %s" % (len(ptiList)))
+          count = 0
+          for pti in ptiList:
+               if pti.getSource() == "OVERLAY":
+                   PTI.deleteInstance(pti.getPolicyId())
+                   count = count + 1
+          if count > 0:
+              Util.exe(Helper.removeItemsCSM(sn))
+
+      if "border gateway" in switchRole:
+          Util.exe(validateInterfabricDelete(sn, forceDelete))
+          ifcPtiList = Util.exe(PTI.get(sn, "SWITCH", "SWITCH", "", "ifcdelete"))
+          if len(ifcPtiList) == 0:
+              dictObj["force"] = forceDelete
+              processRespObj(respObj, PTI.executePyTemplateMethod("interface_utility", dictObj, "isMSDMemberSwitchDelAllowed"))
+              if respObj.isRetCodeFailure():
+                  return respObj
+              else:
+                  if isVPC:
+                      vpcPeerSn = Util.exe(VpcWrapper.get(VPCMetaDataType.PEER_DEVICE_SN, Fabric_name, sn))
+                      PTI.createOrUpdate(vpcPeerSn, "SWITCH", "SWITCH", "", 10, "ifcdelete", {})
+
+          ptiList = Util.exe(PTIWrapper.get(sn))
+          Wrapper.print("Count is %s" % (len(ptiList)))
+          count = 0
+          for pti in ptiList:
+              if pti.getSource() == "OVERLAY":
+                  PTI.deleteInstance(pti.getPolicyId())
+                  count = count + 1
+          if count > 0:
+             Util.exe(Helper.removeItemsCSM(sn))
+
+          if isVPC:
+              Wrapper.print("PSD: started overlay deletion for VPC config")
+              vpcPeerSn = Util.exe(VpcWrapper.get(VPCMetaDataType.PEER_DEVICE_SN, Fabric_name, sn))
+              ptiList = Util.exe(PTI.get(vpcPeerSn))
+              Wrapper.print("Count is %s" % (len(ptiList)))
+              count = 0
+              for pti in ptiList:
+                  if pti.getSource() == "OVERLAY":
+                      PTI.deleteInstance(pti.getPolicyId())
+                      count = count + 1
+              if count > 0:
+                 Util.exe(Helper.removeItemsCSM(vpcPeerSn))
+
+      if deleteSwitch:
+          # check whether service has been enabled
+          Util.exe(PTI.executePyTemplateMethod("Easy_Fabric_Extn_ios_xe", dictObj, "delFabricIntfConfig"))
+          Wrapper.print("PSD: started for BGP config")
+          PTI.executePyTemplateMethod("Easy_Fabric_Extn_ios_xe", dictObj, "bgpConfigDel")
+          Wrapper.print("PSD: started for RP config")
+          PTI.executePyTemplateMethod("Easy_Fabric_Extn_ios_xe", dictObj, "rpConfigDel")
+
+      if isVPC:
+          Wrapper.print("PSD: started for VPC config")
+          vpcPeerSn = Util.exe(VpcWrapper.get(VPCMetaDataType.PEER_DEVICE_SN, Fabric_name, sn))
+          PTI.createOrUpdate(sn, "SWITCH", "SWITCH", "", 10, "switch_delete_simulated", {})
+          PTI.createOrUpdate(vpcPeerSn, "SWITCH", "SWITCH", "", 10, "switch_delete_simulated", {})
+          #disjoinvpcParing(topologyDataObj, vpcPeerSn, False)
+          Wrapper.print("PSD: Unpair VPC")
+          Util.exe(VpcWrapper.delete(sn))
+
+      Wrapper.print("PSD: Delete all PTIs of device")
+      Wrapper.print("PSD: Convert fabric connections to hosts")
+      PTI.delete(sn)
+      #This is done after PTI delete to ensure Resource for
+      #link subnet after freed up in the end
+      RM.deleteSwitchResources(sn)
+      CDW.clearDeployerHistory(sn)
+      if deleteSwitch:
+          DHCPUtil.dhcpDeviceBlock(DHCPUtil.DELETE_HOST, Fabric_name, sn)
+      if "super" in switchRole:
+          spinesWithSuperRole = topologyDataObj.get(TopologyInfoType.SPINES_WITH_SUPER_ROLE)
+          spinesWithSuperRoleCnt = str(len(spinesWithSuperRole) - 1)
+          FabricWrapper.update(Fabric_name, "SSPINE_COUNT", spinesWithSuperRoleCnt)
+      elif "spine" in switchRole:
+          spines = topologyDataObj.get(TopologyInfoType.SPINES)
+          spinesRoleCnt = str(len(spines) - 1)
+          FabricWrapper.update(Fabric_name, "SPINE_COUNT", spinesRoleCnt)
+
+      #If VPC then delete both VPC pair
+      if isVPC and deleteSwitch:
+          InventoryWrapper.removeSwitch(Fabric_name, sn, forceDelete)
+          if "border gateway" not in switchRole:
+              #if check and code under it is not needed in 11.5 as not last stage of release
+              #avoiding this case for taking care of vPC BGW Deletion scenarios for the B2B case
+              dictionaryObj.update({"deviceSerial":vpcPeerSn})
+              preSwitchDelete(dictionaryObj)
+          InventoryWrapper.removeSwitch(Fabric_name, vpcPeerSn, forceDelete)
+
+      return respObj
+    except respObjError as e:
+        respObj = e.value
+        return respObj
+    finally:
+        Wrapper.print("==========ACTION: FAB [%s]: Finish: preSwitchDelete: Serial [%s]. Success = [%r]" %
+                (Fabric_name, dictionaryObj["deviceSerial"], respObj.isRetCodeSuccess()))
+
+def configSave(dictionaryObj):
+
+    Wrapper.print("==========ACTION: FAB [%s]: Start: configSave" % (FABRIC_NAME))
+    respObj = WrappersResp.getRespObj()
+    respObj.setSuccessRetCode()
+    try:
+        Util.exe(actionAllow())
+
+        dcnmUser = dictionaryObj.get("dcnmUser")
+        #get the whole topology from topology database
+        topologyDataObj = TopologyData(Util.exe(TopologyWrapper.get(FABRIC_NAME)))
+
+        devices = topologyDataObj.get(TopologyInfoType.SWITCHES)
+        devices = filter(None, devices)
+
+        #Valid topology
+        if len(devices) == 0:
+            respObj.addErrorReport(configSave.__name__, "Fabric %s cannot be deployed without any switches" % FABRIC_NAME)
+            respObj.setFailureRetCode()
+            return respObj
+
+        gVarDictObj = getStrGlobals()
+        gVarDictObj.update({"BRFIELD_DEBUG_FLAG": BRFIELD_DEBUG_FLAG})
+        gVarDictObj.update({"topologyObj": topologyDataObj})
+        gVarDictObj.update({"dcnmUser": dcnmUser})
+        processRespObj(respObj, PTI.executePyTemplateMethod("fabric_upgrade_ios_xe", gVarDictObj, "handleUpgradeOrBrownfield"))
+        if respObj.isRetCodeFailure():
+            return respObj
+                 
+        #Validate fabric setting change
+        dictObj = getStrGlobals()
+        dictObj.update({"DEVICES": devices})
+        dictObj.update({"topologyObj": topologyDataObj})
+        Util.exe(PTI.executePyTemplateMethod("fabric_utility_11_1", dictObj, "validateFabricSetting"))
+
+        dict = getGlobals()
+        dict["topologyObj"] = topologyDataObj
+        processRespObj(respObj, PTIWrapper.executePyTemplateMethod("Easy_Fabric_Extn_ios_xe", dict, "configSaveExtn"))
+        Util.exe(Util.topDownRmTrackingRqrd(FABRIC_NAME, devices))
+        Wrapper.print("configSave: after calling configSaveExtn")
+
+        return respObj
+    except respObjError as e:
+        respObj = e.value
+        return respObj
+    finally:
+        Wrapper.print("==========ACTION: FAB [%s]: Finish: configSave: Success = [%r]" %
+                (FABRIC_NAME, respObj.isRetCodeSuccess()))
+
+def processRespObj(respObj, newResp):
+    Wrapper.print("processRespObj: respObj isSuccess [%r] newResp isSuccess [%r]" % (respObj.isRetCodeSuccess(), newResp.isRetCodeSuccess()))
+    errs = newResp.getErrorList()
+    if (errs != None):
+        if not respObj.isRetCodeFailure():
+            # since there is a valid error list.. we assume the retcode is a non-success error code
+            respObj.setRetCode(newResp.getRetCode())
+        list = respObj.getErrorList()
+        if (list != None):
+            Wrapper.print("processRespObj: Found %d existing error entries. Adding %d more" % (len(list), len(errs)))
+        else:
+            Wrapper.print("processRespObj: Adding %d entries" % len(errs))
+            list = []
+
+        for err in errs:
+            list.append(err)
+        respObj.setErrorList(list)
+    if newResp.isResolve() == True:
+        respObj.setResolve(newResp.isResolve())
+        respObj.setResolveId(newResp.getResolveId())
+        resolvePayload = {}
+        respObj.setResolvePayload(newResp.getResolvePayload())
+        
+    Wrapper.print("processRespObj: After respObj isSuccess [%r]" % (respObj.isRetCodeSuccess()))
+
+def checkIfDuplicatePools(respObj):
+    try:
+        fabricNvPairList = Util.exe(Helper.getAllFabricsNvPairs())
+        for fabric in fabricNvPairList:
+            if "FABRIC_NAME" in fabric:
+                if FABRIC_NAME == fabric["FABRIC_NAME"]:
+                     Wrapper.print("checkIfDuplicatePools: Skip self %s" %
+                                   fabric["FABRIC_NAME"])
+                     continue
+
+            if "LOOPBACK0_IP_RANGE" in fabric:
+                if LOOPBACK0_IP_RANGE == fabric["LOOPBACK0_IP_RANGE"]:
+                    respObj.addWarnReport(FABRIC_NAME, "Loopback 0 range "
+                                          "duplicate with fabric: " +
+                                          fabric["FABRIC_NAME"])
+
+                    Wrapper.print("checkIfDuplicatePools: Loopback 0 range "
+                                  "duplicate with fabric" +
+                                  fabric["FABRIC_NAME"])
+
+            if "LOOPBACK1_IP_RANGE" in fabric:
+                if LOOPBACK1_IP_RANGE == fabric["LOOPBACK1_IP_RANGE"]:
+                    respObj.addWarnReport(FABRIC_NAME, "Loopback 1 range "
+                                          "duplicate with fabric: " +
+                                          fabric["FABRIC_NAME"])
+
+                    Wrapper.print("checkIfDuplicatePools: Loopback 1 range "
+                                  "duplicate with fabric" +
+                                  fabric["FABRIC_NAME"])
+
+            if "DCI_SUBNET_RANGE" in fabric:
+                if DCI_SUBNET_RANGE == fabric["DCI_SUBNET_RANGE"] and DCI_SUBNET_RANGE != "":
+                    respObj.addWarnReport(FABRIC_NAME, "DCI subnet range "
+                                          "duplicate with fabric: " +
+                                          fabric["FABRIC_NAME"])
+
+                    Wrapper.print("checkIfDuplicatePools: DCI subnet range "
+                                  "duplicate with fabric: " +
+                                  fabric["FABRIC_NAME"])
+
+            if MPLS_HANDOFF == "true":
+                if ("MPLS_HANDOFF" in fabric) and (fabric["MPLS_HANDOFF"] == "true"):
+                    if ("MPLS_LOOPBACK_IP_RANGE" in fabric) and (MPLS_LOOPBACK_IP_RANGE == fabric["MPLS_LOOPBACK_IP_RANGE"]):
+                        respObj.addWarnReport(FABRIC_NAME, "MPLS Loopback range "
+                                              "duplicate with fabric: " +
+                                              fabric["FABRIC_NAME"])
+
+                        Wrapper.print("checkIfDuplicatePools: MPLS Loopback range "
+                                      "duplicate with fabric" +
+                                      fabric["FABRIC_NAME"])
+
+    except respObjError as e:
+        respObj = e.value
+        return respObj
+
+def checkIfDuplicateV6Pools(respObj):
+    try:
+        fabricNvPairList = Util.exe(Helper.getAllFabricsNvPairs())
+        for fabric in fabricNvPairList:
+            if "FABRIC_NAME" in fabric:
+                if FABRIC_NAME == fabric["FABRIC_NAME"]:
+                     Wrapper.print("checkIfDuplicateV6Pools: Skip self %s" %
+                                   fabric["FABRIC_NAME"])
+                     continue
+
+            if "LOOPBACK0_IPV6_RANGE" in fabric:
+                if LOOPBACK0_IPV6_RANGE == fabric["LOOPBACK0_IPV6_RANGE"]:
+                    respObj.addWarnReport(FABRIC_NAME, "Loopback 0 V6 range "
+                                          "duplicate with fabric: " +
+                                          fabric["FABRIC_NAME"])
+
+                    Wrapper.print("checkIfDuplicateV6Pools: Loopback 0 V6 range "
+                                  "duplicate with fabric" +
+                                  fabric["FABRIC_NAME"])
+
+            if "LOOPBACK1_IPV6_RANGE" in fabric:
+                if LOOPBACK1_IPV6_RANGE == fabric["LOOPBACK1_IPV6_RANGE"]:
+                    respObj.addWarnReport(FABRIC_NAME, "Loopback 1 V6 range "
+                                          "duplicate with fabric: " +
+                                          fabric["FABRIC_NAME"])
+
+                    Wrapper.print("checkIfDuplicateV6Pools: Loopback 1 V6 range "
+                                  "duplicate with fabric" +
+                                  fabric["FABRIC_NAME"])
+
+            if "ROUTER_ID_RANGE" in fabric:
+                if ROUTER_ID_RANGE == fabric["ROUTER_ID_RANGE"]:
+                    respObj.addWarnReport(FABRIC_NAME, "BGP Router Id range for V6 underlay "
+                                          "duplicate with fabric: " +
+                                          fabric["FABRIC_NAME"])
+
+                    Wrapper.print("checkIfDuplicateV6Pools: BGP Router Id range for V6 underlay "
+                                  "duplicate with fabric" +
+                                  fabric["FABRIC_NAME"])
+
+            if "DCI_SUBNET_RANGE" in fabric:
+                if DCI_SUBNET_RANGE == fabric["DCI_SUBNET_RANGE"] and DCI_SUBNET_RANGE != "":
+                    respObj.addWarnReport(FABRIC_NAME, "DCI subnet range "
+                                          "duplicate with fabric: " +
+                                          fabric["FABRIC_NAME"])
+
+                    Wrapper.print("checkIfDuplicateV6Pools: DCI subnet range "
+                                  "duplicate with fabric: " +
+                                  fabric["FABRIC_NAME"])
+
+    except respObjError as e:
+        respObj = e.value
+        return respObj
+
+def getFormattedSwitchName(serialNum):
+    formattedStr = serialNum
+    hostName = InventoryWrapper.getHostNameString(serialNum)
+    if hostName:
+        formattedStr += ("/" + hostName)
+    return formattedStr
+
+def validateInterfabricDelete(serial_number, forceDelete):
+
+    Wrapper.print("==========ACTION: Serial Number [%s] : Start: validateInterfabricDelete" % (serial_number))
+
+    try:
+        respObj = WrappersResp.getRespObj()
+
+        wResp = InterfabricConnectionWrapper.listInterfabrics(serial_number)
+        if wResp.isRetCodeSuccess():
+            Wrapper.print("validateInterfabricDelete: Incoming IFC links to: [%s]" % (serial_number))
+            interfabric_list = wResp.getValue()
+        else:
+            Wrapper.print("validateInterfabricDelete: Error hit in get Incoming IFC links for [%s]: " %(serial_number))
+            return wResp
+
+        if forceDelete:
+            for ifc in interfabric_list:
+                Wrapper.print("validateInterfabricDelete: IFC links for [%s]: ifc [%s]" %(serial_number, ifc))
+                srcSn = ifc["source_switch_sn"]
+                dstSn = ifc["dest_switch_sn"]
+                Util.exe(Util.deleteExtensions(srcSn, dstSn))
+
+        for ifc in interfabric_list:
+            if ifc["extension_type"] == "VRF_LITE" or ifc["extension_type"] == "VXLAN_MPLS_OVERLAY":
+                Wrapper.print("validateInterfabricDelete: Processing IFC ID %s" %(ifc["interfabricId"]))
+                extension_id = int(ifc["interfabricId"])
+                ifc_extension_exists = Util.exe(InterfabricConnectionWrapper.checkIFCExtensions(extension_id))
+
+                if ifc_extension_exists:
+                    srcSwitchStr = getFormattedSwitchName(ifc["source_switch_sn"])
+                    destSwitchStr = getFormattedSwitchName(ifc["dest_switch_sn"])
+
+                    errorMsg = ("Failed to delete switch. Overlays are extended for interfabric link [%s] [%s]<-->[%s] [%s]"
+                                %(srcSwitchStr, ifc["source_if_name"], destSwitchStr, ifc["dest_if_name"]))
+                    respObj.addErrorReport(("InterFabricLink"), errorMsg, serial_number)
+                    respObj.setFailureRetCode()
+                    return respObj
+
+        respObj.setSuccessRetCode()
+        return respObj
+
+    except respObjError as e:
+        respObj = e.value
+        return respObj
+
+    finally:
+        Wrapper.print("==========ACTION: SN [%s]: Finish: validateInterfabricDelete: Success = [%r]" % \
+                (serial_number, respObj.isRetCodeSuccess()))
+
+##
+#
